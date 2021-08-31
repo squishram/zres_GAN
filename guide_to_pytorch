@@ -1,0 +1,91 @@
+                                            #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+                                            #-#-#-#-#-#-PYTORCH-#-#-#-#-#-#
+                                            #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+
+Alright so there's a lot of stuff to remember with pytorch.
+All of it is going to be explained in this little cheat/revision sheet, since there don't seem to be any easy exercises out there for pytorch users.
+
+WHAT IS INCLUDED IN PYTORCH
+
+BASIC AUTOGRAD CALCULATION
+needs: 
+import torch
+import torch.nn
+
+DEFINING DATA AS NODES USING PYTORCH TENSOR ARRAY
+torch.tensor()  ==== a pytorch array
+                    Arguments:
+                    ==== [your array] - accepts list comprehensions
+                    ==== dtype=None by default, can be torch.int, torch.float32, torch.float64, etc.
+                    ==== requiresGrad=False by default. Backpropagation of a variable requires that requiresGrad=True
+torch.rand()    ==== a pytorch array filled with random numbers in interval [0,1]. 
+                    ==== Identical to torch.tensor(), except it takes as primary input the array dimensions and fills it by itself
+
+
+
+w.grad()        ==== retrieves the gradient of w with respect to y when
+                    ==== y has been defined in terms of w (y = w*x + b for linear regression)
+                    ==== w is a tensor for which requiresGrad=True
+                    ==== y.backward has been called and #
+
+DEFINING A LINEAR TRANSFORMATION MODEL THAT APPLIES WEIGHTS AND BIASES TO A LAYER
+model = nn.Linear() ==== for linear regression (y = w*x + b), creates a model that can apply a linear transformation
+                    ==== (i.e. applies weights to input layer)
+                    ==== the model is saved as a variable, say "model". Then the model can be applied to the input layer using model(X)
+                        Arguments:
+                        ==== size of the input layer
+                        ==== size of the output layer
+
+MAPPING OUTPUT/HIDDEN LAYERS TO POSITIVE VALUES OR [0, 1] VALUES
+nn.RelU()       ==== maps all <0 value to 0 and all >0 values to themselves
+                    ==== good for hidden layers
+nn.Softmax      ==== maps all values in the layer to exp(vals), then transforms them to a fraction of the sum of vals (good for output layer)
+                    ==== similar to sigmoid
+nn.LogSoftmax   ==== maps all values to log(Softmax) (good for output layer)
+
+DEFINING A NETWORK WITH HIDDEN LAYERS - E.G. FOR TWO HIDDEN LAYERS:
+model = nn.Sequential(nn.Linear(input_size, hidden_sizes[0]),
+                      nn.ReLU(),
+                      nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+                      nn.ReLU(),
+                      nn.Linear(hidden_sizes[1], output_size),
+                      nn.LogSoftmax(dim=1))
+                    ==== input_size = number of input nodes
+                    ==== hidden_sizes[i] = number of nodes in ith hidden layer
+                    ==== output_size = number of potential classifications
+
+CONVOLUTIONAL LAYER STRUCTURE
+torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros', device=None, dtype=None)
+
+FINDING THE LOSS/ COST AS MEAN SQUARED ERROR
+nn.MSELoss(Y, Y_pred)   ==== calculates the loss in MSE. For ease of use, save to variable "loss"
+                        Arguments:
+                        ==== desired output, Y
+                        ==== predicted output, Y_pred
+
+COMPUTING THE GRADIENT
+loss.backward() ==== computes the gradients, where
+                    ==== loss = nn.MSELoss()
+                    ==== the output will be e.g. w.grad(), the gradient, which can only be calculated if w is a requiresGrad=True tensor
+
+
+OPTIMISING THE MODEL USING STOCHASTIC GRADIENT DESCENT
+nn.torch.optim.SGD() ==== creates a model that can be iteratively applied to "walk down the hill" and minimise the loss
+                    Arguments:
+                    ==== model.parameters(), where model = nn.Linear(...), our linear transformation
+                    ==== lr=the learning rate, the rate of our gradient descent - which we define ourselves as a float, (e.g. learn_rate)
+opt.step()      ==== updates the weights, where opt = nn.torch.optim.SGD
+opt.zero_grad() ==== resets gradient to 0 (so your next step down isn't too large)
+
+
+
+
+
+
+
+
+
+
+
+
+

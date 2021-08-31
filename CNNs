@@ -1,0 +1,12 @@
+CNNs are practical for 2 main reasons
+1. They effectively reduce the number of input nodes, which is great if you're looking at a detailed image with many pixels
+2. They look for correlated features instead of 'hard' locations
+        This allows them to tolerate small shifts/translations in an object's location within the image
+
+
+CNNs lose out when
+1. they need to recognise a feature that has undergone transformations other than translation (tilt/rotation/big scaling)
+2. adversarial examples: adding a small amount of noise to an image can really fuck with a CNN's ability to recognise an image
+   even if they look basically identical to a human!
+3. CNNs are slower
+4. CNNs need larger training datasets

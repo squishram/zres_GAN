@@ -1,0 +1,8 @@
+/.vscode
+/_pycache_
+/catface
+/img_align_celeba
+/MNIST
+/PATH_TO_STORE_TRAINSET
+/PATH_TO_STORE_TESTSET
+/prelim_jupyter

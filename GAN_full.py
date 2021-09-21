@@ -1,5 +1,5 @@
 from __future__ import print_function
-#matplotlib inline
+# matplotlib inline
 import argparse
 import os
 import random
@@ -18,18 +18,14 @@ import matplotlib.animation as animation
 from IPython.display import HTML
 from torchvision.utils import save_image, make_grid
 
-
-
-
 # Set random seed for reproducibility
 manualSeed = 999
-#manualSeed = random.randint(1, 10000) # use if you want new results
+# manualSeed = random.randint(1, 10000) # use if you want new results
 print("Random Seed: ", manualSeed)
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 
-
-# dataroot - the path to the root of the dataset folder
+# path_data - the path to the root of the dataset folder
 path_data = r'C:\Users\User\Documents\Current_Work\code_Python\SMLM\catface'
 # make a directory for the generated images
 dir_samples = 'generated'
@@ -40,7 +36,7 @@ os.makedirs(path_samples, exist_ok=True)
 # must be 0 for non-multi-threaded CPU/GPU
 n_workers = 0
 # the batch size used in training
-size_batch =  128
+size_batch = 128
 
 # The spatial size of the images used for training. This implementation defaults to 64x64
 # NOTE: If another size is desired, the structures of D and G must be changed
@@ -59,10 +55,9 @@ n_epochs = 5
 lr = 0.0002
 # beta1 - beta1 hyperparameter for Adam optimizers. As described in paper, this number should be 0.5
 beta1 = 0.5
-# ngpu - number of GPUs available. If this is 0, code will run in CPU mode. If this number is greater than 0 it will run on that number of GPUs
+# n_gpu - number of GPUs available
 n_gpu = 0
-
-
+# If this is 0, code will run in CPU mode. If this number is greater than 0 it will run on that number of GPUs
 
 # custom weights initialization called on netG and netD
 def weights_init(m):
@@ -72,7 +67,8 @@ def weights_init(m):
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
-        
+
+
 # Generator Code
 class Generator(nn.Module):
     def __init__(self, ngpu):
@@ -80,19 +76,19 @@ class Generator(nn.Module):
         self.ngpu = ngpu
         self.main = nn.Sequential(
             # input is Z, going into a convolution
-            nn.ConvTranspose2d(n_latent, ngf*8, 4, 1, 0, bias=False),
-            nn.BatchNorm2d(ngf*8),
+            nn.ConvTranspose2d(n_latent, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
             nn.ReLU(True),
             # state size. (ngf*8) x 4 x 4
-            nn.ConvTranspose2d(ngf*8, ngf*4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf*4),
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
             nn.ReLU(True),
             # state size. (ngf*4) x 8 x 8
-            nn.ConvTranspose2d(ngf*4, ngf*2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf*2),
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
             nn.ReLU(True),
             # state size. (ngf*2) x 16 x 16
-            nn.ConvTranspose2d(ngf*2, ngf, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
@@ -103,7 +99,8 @@ class Generator(nn.Module):
 
     def forward(self, input):
         return self.main(input)
-    
+
+
 class Discriminator(nn.Module):
     def __init__(self, ngpu):
         super(Discriminator, self).__init__()
@@ -113,19 +110,19 @@ class Discriminator(nn.Module):
             nn.Conv2d(in_channels=nc, out_channels=ndf, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
-            nn.Conv2d(ndf, ndf*2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf*2),
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(ndf*2, ndf*4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf*4),
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(ndf*4, ndf*8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf*8),
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf*8, 1, 4, 1, 0, bias=False),
+            nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
             nn.Sigmoid()
         )
 
@@ -136,12 +133,14 @@ class Discriminator(nn.Module):
 def denorm(img_tensors):
     return img_tensors * 0.5 + 0.5
 
+
 # The function to save all the generated images:
 def save_samples(index, latent_tensors, path_samples):
     fake_images = netG(latent_tensors)
     fake_fname = 'generated-images-{0:0=4d}.png'.format(index)
     save_image(denorm(fake_images), os.path.join(path_samples, fake_fname), nrow=8)
     print('Saving', fake_fname)
+
 
 # We can use an image folder dataset the way we have it setup.
 # Create the dataset
@@ -150,8 +149,7 @@ dataset = dset.ImageFolder(path_data,
                                tt.Resize(size_img),
                                tt.CenterCrop(size_img),
                                tt.ToTensor(),
-                               tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),]))
-
+                               tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ]))
 
 # Create the dataloader
 dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
@@ -159,14 +157,12 @@ dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_
 # Decide which device we want to run on
 device = torch.device("cuda:0" if (torch.cuda.is_available() and n_gpu > 0) else "cpu")
 
-
 # Plot some training images
 real_batch = next(iter(dataloader))
 plt.figure(figsize=(8, 8))
 plt.axis("off")
 plt.title("Training Images")
-plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=2, normalize=True).cpu(),(1,2,0)))
-
+plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=2, normalize=True).cpu(), (1, 2, 0)))
 
 # Create the generator
 netG = Generator(n_gpu).to(device)
@@ -286,25 +282,23 @@ for epoch in range(n_epochs):
         D_losses.append(errD.item())
 
         # Check how the generator is doing by saving G's output on fixed_noise
-        if (iters % 500 == 0) or ((epoch == n_epochs-1) and (i == len(dataloader)-1)):
-            #with torch.no_grad():
+        if (iters % 500 == 0) or ((epoch == n_epochs - 1) and (i == len(dataloader) - 1)):
+            # with torch.no_grad():
             #    fake = netG(fixed_latent).detach().cpu()
-            #img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+            # img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
 
             save_samples(epoch + iters + 1, fixed_latent, path_samples)
-        
+
         iters += 1
-        
-        
-plt.figure(figsize=(10,5))
+
+plt.figure(figsize=(10, 5))
 plt.title("Generator and Discriminator Loss During Training")
-plt.plot(G_losses,label="G")
-plt.plot(D_losses,label="D")
+plt.plot(G_losses, label="G")
+plt.plot(D_losses, label="D")
 plt.xlabel("iterations")
 plt.ylabel("Loss")
 plt.legend()
 plt.show()
-
 
 # Grab a batch of real images from the dataloader
 # real_batch = next(iter(dataloader))

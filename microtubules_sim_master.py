@@ -165,7 +165,7 @@ def patch3D(coords, size_patch=5):
     
     return inds
 
-def image_of_gaussians(data, size_img, size_patch=5):
+def image_of_gaussians(data, size_img, overlap, size_patch=5):
     """
     NOTE: NEEDS TO ADJUST CHUNK SIZES IF IMAGE SIZE IS NOT PERFECT CUBE
     Breaks up coordinate data into 3D chunks to decrease runtime,
@@ -198,21 +198,26 @@ def image_of_gaussians(data, size_img, size_patch=5):
     # Now load up those empty arrays with the data (only the data in each chunk)!                
     # This loop goes through all the points in data, and loads up the empty arrays in chunked_data with them as appropriate
     for j in range(len(data[0])):
-        # don't need to do this can use the position to do the calculaion I think (see next loops)
+        # don't need to do this can use the position to do the calculation I think (see next loops)
         for x in range(n_chunks[0]):
             xstart = (size_img[0]*x)//n_chunks[0]
             for y in range(n_chunks[1]):
                 ystart = (size_img[1]*y)//n_chunks[1]
                 for z in range(n_chunks[2]):
-                    zstart = (size_img[2]*z)//n_chunks[2]
-                    
-                    # if the point is inside the chunk, append it to that chunk!
-                    if ((data[0][j] >= xstart - overlap and data[0][j] < (xstart + size_patch[0] + overlap)) and
-                        (data[1][j] >= ystart - overlap and data[1][j] < (ystart + size_patch[1] + overlap)) and
-                        (data[2][j] >= zstart - overlap and data[2][j] < (zstart + size_patch[2] + overlap))):
-                        # edited to include the sigma & intensity information
-                        chunked_data[x][y][z].append([data[0][j], data[1][j], data[2][j], data[3][j], data[4][j], data[5][j]])
+                    zstart = (size_img[2] * z) // n_chunks[2]
 
+                    print(data[0][j])
+                    print(xstart)
+                    print(overlap)
+                    print(size_patch)
+
+                    # edited to include the sigma & intensity information
+                    if (data[0][j] < xstart - overlap or data[0][j] >= (xstart + size_patch[0] + overlap)) or (
+                        data[1][j] < ystart - overlap or data[1][j] >= (ystart + size_patch[1] + overlap)) or (
+                        data[2][j] < zstart - overlap or data[2][j] >= (zstart + size_patch[2] + overlap)):
+                        continue
+                    # if the point is inside the chunk, append it to that chunk!
+                    chunked_data[x][y][z].append([data[0][j], data[1][j], data[2][j], data[3][j], data[4][j], data[5][j]])
 
     # NOTE this needs to be fixed to accomodate potentially varying sizes of chunk
     # creates a matrix of indices for each dimension (x, y, and z)

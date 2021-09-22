@@ -25,7 +25,7 @@ To do:
 - Set it up so it takes in varying sig/int values (from the list) - DONE
 
 Questions for Susan:
-How do I cange this part of the code (lines ~224-229) to accomodate non-perfectly cuboidal chunks?
+How do I cange this part of the code (lines ~194-199) to accomodate non-perfectly cuboidal chunks?
 
 NOTE: cursory testing found 5^3 chunks for 96^3 voxel image to be fastest (faster than 4 chunks and 6 chunks for the same data)
 This translates to a (ROUGHLY) optimal voxels/chunk of 19, so this has been incoorporated into the code

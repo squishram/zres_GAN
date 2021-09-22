@@ -25,14 +25,10 @@ To do:
 - Set it up so it takes in varying sig/int values (from the list) - DONE
 
 Questions for Susan:
-- Is it actually a good idea to move everything from numpy to torch, or are we better off converting at the end?
-As I understand it, numpy is known to be a fair bit faster for calculations on large arrays (~1.5x faster for arrays with >10^4 elements)
-- As I understand it, this code pools instensity values in from every single point in each chunk. Doesn't this mean we'll get edge effects?
-- I can't find the documentation on .expand() online. 
 How do I cange this part of the code (lines ~224-229) to accomodate non-perfectly cuboidal chunks?
 
 NOTE: cursory testing found 5^3 chunks for 96^3 voxel image to be fastest (faster than 4 chunks and 6 chunks for the same data)
-This translates to a (ROUGHLY) optimal vox/chunk ratio of 19, so this has been incoorporated into the code
+This translates to a (ROUGHLY) optimal voxels/chunk of 19, so this has been incoorporated into the code
 """
 
 
@@ -230,32 +226,7 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
     data = np.array(data)
     data = data.T
 
-    # for point in np.nditer(data, order='F', flags=['external_loop']):
-    #     cx = point[0]
-    #     cy = point[1]
-    #     cz = point[2]
-    #     cintensity = point[3]
-    #     csig_xy = point[4]
-    #     csig_z = point[5]
-    #     # define the normalisation constant for the gaussian
-    #     const_norm = cintensity/((csig_xy**3)*(2*np.pi)**1.5)
-    #     # add the gaussian contribution to the spot
-    #     intensityspot += const_norm*torch.exp(-(((xi + xstart - cx)**2)/(2*csig_xy**2)
-    #                                           + ((yi + ystart - cy)**2)/(2*csig_xy**2)
-    #                                           + ((zi + zstart - cz)**2)/(2*csig_z **2)))
-    #
-    # xend = xstart + size_patch[0]
-    # yend = ystart + size_patch[1]
-    # zend = zstart + size_patch[2]
-    # img[xstart:xend, ystart:yend, zstart:zend] = intensityspot
     return np.array(img)
-
-    # note assumes cuboidal data prob not correct
-    # get all pixels corresponding to chunk + 4 sigma
-    # BEWARE EDGE EFFECTS
-    # this assumes all chunk dimenstions same size
-    # find which data points are inside that chunk
-
 
 # Initialize timer
 time1 = time()

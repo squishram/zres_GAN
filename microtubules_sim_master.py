@@ -15,10 +15,12 @@ This code generates 3D images of simulated microtubules. Workflow:
    Signal is then pooled from a surrounding patch of pre-determined size into the central voxel
 4. Scales up the signal to match the desired image bittage and saves the final array as a tiff
 
+
 To do:
-- Convert everything from numpy to torch 
+- NEEDS TO ADJUST CHUNK SIZES IF IMAGE SIZE IS NOT PERFECT CUBE
+- Add patch calculation to potentially reduce overlap effects? Could be complicated
 - Annotate the code in full, streamline where possible
-- Find the optimal number of chunks for speed
+- Find the optimal number of chunks for speed - DONE
 - Set it up so it takes in varying sig/int values (from the list) - DONE
 
 Questions for Susan:
@@ -167,7 +169,6 @@ def patch3D(coords, size_patch=5):
 
 def image_of_gaussians(data, size_img, overlap, size_patch=5):
     """
-    NOTE: NEEDS TO ADJUST CHUNK SIZES IF IMAGE SIZE IS NOT PERFECT CUBE
     Breaks up coordinate data into 3D chunks to decrease runtime,
     Retrieves gaussian contributions to each pixel using coordinate, intensity, and sigma data
     outputs n_chunks arrays each with the data that could contribute to chunk n_chunks. 
@@ -195,8 +196,7 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
             for z in range(n_chunks[2]):
                     chunked_data[x][y][z] = []
     
-    # Now load up those empty arrays with the data (only the data in each chunk)!                
-    # This loop goes through all the points in data, and loads up the empty arrays in chunked_data with them as appropriate
+    # This loop loads up the empty arrays with chunked_data with them as appropriate
     for j in range(len(data[0])):
         # don't need to do this can use the position to do the calculation I think (see next loops)
         for x in range(n_chunks[0]):
@@ -206,15 +206,10 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                 for z in range(n_chunks[2]):
                     zstart = (size_img[2] * z) // n_chunks[2]
 
-                    print(data[0][j])
-                    print(xstart)
-                    print(overlap)
-                    print(size_patch)
-
                     # edited to include the sigma & intensity information
-                    if (data[0][j] < xstart - overlap or data[0][j] >= (xstart + size_patch[0] + overlap)) or (
-                        data[1][j] < ystart - overlap or data[1][j] >= (ystart + size_patch[1] + overlap)) or (
-                        data[2][j] < zstart - overlap or data[2][j] >= (zstart + size_patch[2] + overlap)):
+                    if (data[0][j] < xstart - overlap[0] or data[0][j] >= (xstart + size_patch[0] + overlap[0])) or (
+                        data[1][j] < ystart - overlap[1] or data[1][j] >= (ystart + size_patch[1] + overlap[1])) or (
+                        data[2][j] < zstart - overlap[2] or data[2][j] >= (zstart + size_patch[2] + overlap[2])):
                         continue
                     # if the point is inside the chunk, append it to that chunk!
                     chunked_data[x][y][z].append([data[0][j], data[1][j], data[2][j], data[3][j], data[4][j], data[5][j]])
@@ -225,8 +220,10 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
     zi = N.expand(size_patch[0], size_patch[1], size_patch[2])
     xi = zi.transpose(0, 2)
     yi = zi.transpose(1, 2)
-    
-    
+
+    # Convert data array to list temporarily as these are faster to iterate through
+    data = data.T
+    data = data.tolist()
     # This loop calculates the contributions from each local gaussian to each chunk
     for x in range(n_chunks[0]):
         xstart = (size_img[0]*x)//n_chunks[0]
@@ -236,9 +233,9 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                 zstart = (size_img[2]*z)//n_chunks[2]
 
                 intensityspot = torch.zeros((size_patch[0], size_patch[1], size_patch[2]))
-                
-                # NOTE do we want to include a patch calculation here?
 
+
+                # NOTE do we want to include a patch calculation here?
                 for cx, cy, cz, cintensity, csig_xy, csig_z in data:
                     # define the normalisation constant for the gaussian
                     const_norm = cintensity/((csig_xy**3)*(2*np.pi)**1.5)
@@ -246,10 +243,33 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                     intensityspot += const_norm*torch.exp(-(((xi + xstart - cx)**2)/(2*csig_xy**2)
                                                         +   ((yi + ystart - cy)**2)/(2*csig_xy**2)
                                                         +   ((zi + zstart - cz)**2)/(2*csig_z **2)))
-                    
-                
-                img[xstart:xstart + size_patch[0], ystart:ystart + size_patch[1], zstart:zstart + size_patch[2]] = intensityspot
-    
+                xend = xstart + size_patch[0]
+                yend = ystart + size_patch[1]
+                zend = zstart + size_patch[2]
+                img[xstart:xend, ystart:yend, zstart:zend] = intensityspot
+    data = np.array(data)
+    data = data.T
+
+
+
+                # for point in np.nditer(data, order='F', flags=['external_loop']):
+                #     cx = point[0]
+                #     cy = point[1]
+                #     cz = point[2]
+                #     cintensity = point[3]
+                #     csig_xy = point[4]
+                #     csig_z = point[5]
+                #     # define the normalisation constant for the gaussian
+                #     const_norm = cintensity/((csig_xy**3)*(2*np.pi)**1.5)
+                #     # add the gaussian contribution to the spot
+                #     intensityspot += const_norm*torch.exp(-(((xi + xstart - cx)**2)/(2*csig_xy**2)
+                #                                           + ((yi + ystart - cy)**2)/(2*csig_xy**2)
+                #                                           + ((zi + zstart - cz)**2)/(2*csig_z **2)))
+                #
+                # xend = xstart + size_patch[0]
+                # yend = ystart + size_patch[1]
+                # zend = zstart + size_patch[2]
+                # img[xstart:xend, ystart:yend, zstart:zend] = intensityspot
     return np.array(img)
 
     # note assumes cuboidal data prob not correct

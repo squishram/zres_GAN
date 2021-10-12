@@ -1,12 +1,7 @@
 from __future__ import print_function
-# matplotlib inline
-import argparse
 import os
 import random
-import torch
 import torch.nn as nn
-import torch.nn.parallel
-import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torch.utils.data
 import torchvision.datasets as dset
@@ -14,9 +9,12 @@ import torchvision.transforms as tt
 import torchvision.utils as vutils
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from IPython.display import HTML
 from torchvision.utils import save_image, make_grid
+from time import time
+from pathlib import Path
+
+# begin timer
+t1 = time()
 
 # Set random seed for reproducibility
 manualSeed = 999
@@ -26,22 +24,23 @@ random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 
 # path_data - the path to the root of the dataset folder
-path_data = r'C:\Users\User\Documents\Current_Work\code_Python\SMLM\catface'
+path_data = os.path.join(os.getcwd(), "catface/")
 # make a directory for the generated images
-dir_samples = 'generated'
+dir_samples = Path("images/generated/")
 # this is the full path for the sample images
 path_samples = os.path.join(path_data, dir_samples)
 os.makedirs(path_samples, exist_ok=True)
 # workers - the number of worker threads for loading the data with the DataLoader
 # must be 0 for non-multi-threaded CPU/GPU
-n_workers = 0
+n_workers = 2
 # the batch size used in training
 size_batch = 128
 
 # The spatial size of the images used for training. This implementation defaults to 64x64
 # NOTE: If another size is desired, the structures of D and G must be changed
 size_img = 64
-# nc - number of color channels in the input images. For color images this is 3
+# nc - number of color channels in the input images.
+# For color images this is =3, for BW images it's =1
 nc = 3
 # nz - length of latent vector (this is the random noise from which the fake image is generated)
 n_latent = 100
@@ -50,14 +49,12 @@ ngf = 64
 # ndf - sets the depth of feature maps propagated through the discriminator
 ndf = 64
 # number of training epochs to run
-n_epochs = 5
+n_epochs = 60
 # lr - learning rate for training. As described in the DCGAN paper, this number should be 0.0002
 lr = 0.0002
 # beta1 - beta1 hyperparameter for Adam optimizers. As described in paper, this number should be 0.5
 beta1 = 0.5
-# n_gpu - number of GPUs available
-n_gpu = 0
-# If this is 0, code will run in CPU mode. If this number is greater than 0 it will run on that number of GPUs
+
 
 # custom weights initialization called on netG and netD
 def weights_init(m):
@@ -135,10 +132,10 @@ def denorm(img_tensors):
 
 
 # The function to save all the generated images:
-def save_samples(index, latent_tensors, path_samples):
+def save_samples(index, latent_tensors, path):
     fake_images = netG(latent_tensors)
     fake_fname = 'generated-images-{0:0=4d}.png'.format(index)
-    save_image(denorm(fake_images), os.path.join(path_samples, fake_fname), nrow=8)
+    save_image(denorm(fake_images), os.path.join(path, fake_fname), nrow=8)
     print('Saving', fake_fname)
 
 
@@ -154,7 +151,10 @@ dataset = dset.ImageFolder(path_data,
 # Create the dataloader
 dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
 
-# Decide which device we want to run on
+
+# find the number of GPUs available
+n_gpu = torch.cuda.device_count()
+# check for a GPU; use as device if available
 device = torch.device("cuda:0" if (torch.cuda.is_available() and n_gpu > 0) else "cpu")
 
 # Plot some training images
@@ -164,39 +164,40 @@ plt.axis("off")
 plt.title("Training Images")
 plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=2, normalize=True).cpu(), (1, 2, 0)))
 
-# Create the generator
-netG = Generator(n_gpu).to(device)
 
+########################
+# Create the generator #
+########################
+netG = Generator(n_gpu).to(device)
 # Handle multi-gpu if desired
 if (device.type == 'cuda') and (n_gpu > 1):
     netG = nn.DataParallel(netG, list(range(n_gpu)))
-
 # Apply the weights_init function to randomly initialize all weights
-#  to mean=0, stdev=0.2.
+# to mean=0, stdev=0.2.
 netG.apply(weights_init)
-
 # Print the model
 print(netG)
 
-# Create the Discriminator
-netD = Discriminator(n_gpu).to(device)
 
+############################
+# Create the Discriminator #
+############################
+netD = Discriminator(n_gpu).to(device)
 # Handle multi-gpu if desired
 if (device.type == 'cuda') and (n_gpu > 1):
     netD = nn.DataParallel(netD, list(range(n_gpu)))
-
 # Apply the weights_init function to randomly initialize all weights
 #  to mean=0, stdev=0.2.
 netD.apply(weights_init)
-
 # Print the model
 print(netD)
 
-# Initialize BCELoss function
+
+# Initialise BCELoss function
 criterion = nn.BCELoss()
 
 # Create batch of latent vectors that we will use to visualize
-#  the progression of the generator
+# the progression of the generator
 fixed_latent = torch.randn(64, n_latent, 1, 1, device=device)
 
 # Establish convention for real and fake labels during training
@@ -207,7 +208,8 @@ fake_label = 0.
 optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
 
-# Training Loop
+
+# TRAINING LOOP TIME!
 
 # Lists to keep track of progress
 img_list = []
@@ -220,11 +222,11 @@ print("Starting Training Loop...")
 for epoch in range(n_epochs):
     # For each batch in the dataloader
     for i, data in enumerate(dataloader, 0):
+        ###################################################################
+        # (1) Update Discriminator: maximise log(D(x)) + log(1 - D(G(z))) #
+        ###################################################################
 
-        ############################
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-        ###########################
-        ## Train with all-real batch
+        # Train with all-real batch #
         netD.zero_grad()
         # Format batch
         real_cpu = data[0].to(device)
@@ -238,7 +240,7 @@ for epoch in range(n_epochs):
         errD_real.backward()
         D_x = output.mean().item()
 
-        ## Train with all-fake batch
+        # Train with all-fake batch #
         # Generate batch of latent vectors
         noise = torch.randn(b_size, n_latent, 1, 1, device=device)
         # Generate fake image batch with G
@@ -256,9 +258,9 @@ for epoch in range(n_epochs):
         # Update D
         optimizerD.step()
 
-        ############################
-        # (2) Update G network: maximize log(D(G(z)))
-        ###########################
+        ###############################################
+        # (2) Update Generator: maximise log(D(G(z))) #
+        ###############################################
         netG.zero_grad()
         label.fill_(real_label)  # fake labels are real for generator cost
         # Since we just updated D, perform another forward pass of all-fake batch through D
@@ -300,25 +302,8 @@ plt.ylabel("Loss")
 plt.legend()
 plt.show()
 
-# Grab a batch of real images from the dataloader
-# real_batch = next(iter(dataloader))
 
-# print("got this far")
+t2 = time()
 
-# # Plot the real images
-# plt.figure()
-# plt.subplot(1, 2, 1)
-# plt.axis("off")
-# plt.title("Real Images")
-# plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=5, normalize=True).cpu(),(1, 2, 0)))
-
-# print("got this far 2")
-
-# Plot the fake images from the last epoch
-# plt.subplot(1, 2, 2)
-# plt.axis("off")
-# plt.title("Fake Images")
-# plt.imshow(np.transpose(img_list[-1], (1, 2, 0)))
-# plt.show()
-
-# print("got this far 3")
+print("Congrats! Training completed. It took " + str((t2-t1)/60) + " minutes to complete.")
+print("You used a batch size of " + str(size_batch) + " and trained for" + str(n_epochs) + " epochs.")

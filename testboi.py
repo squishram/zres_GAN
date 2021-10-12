@@ -1,82 +1,45 @@
 import numpy as np
+import scipy.integrate as integrate
 
-def chunks_susan(data, size, chunknum, sigmaxy, sigmaz):
-    	#chunknum should be a 3 element vector containing x, y, z chunking values respectively
-        #chunk data into bits
-        #output chunknum arrays each with the data that could contribute to chunk chunknum
-        #to start with let's assume we want to chunk by same factor in x,y, and z directions - correct later
-    	#contribution distance cuttoff depends on sigma so these need to be input too
-        i = 0
-        chunkedxstart = []
-        chunkedystart = []
-        chunkedzstart = []
-        #go through all chunks
-        for x in range(chunknum):
-            for y in range(chunknum):
-                for z in range(chunknum):
-                    # I never actually use i do I want it?
-                    i = i + 1
-                    chunkedxstart.append((size[0]*x)//chunknum)
-                    chunkedystart.append((size[1]*y)//chunknum)
-                    chunkedzstart.append((size[2]*z)//chunknum)
-        #get all pixels corresponding to chunk + 4 sigma
-        #BEWARE EDGE EFFECTS
-    	#this assumes all chunk dimenstions same size
-        chunksize = size[0] // chunknum
-        #find which data points are inside that chunk
-        # for j in range(len(data[0])):
-        #     #print("I got into the for loop")
-        #     #print(data[0][j])
-        # print("this is a check onthe number of points")
-        # print(p)
-        # chunkeddata = 3
-        # return [chunkedxstart,chunkedystart,chunkedzstart,chunksize,chunkeddata]
-    return None
-
-def zero_fill(data):
-    # Get lengths of each row of data
-    lens = np.array([len(i) for i in data])
-
-    # Mask of valid places in each row
-    mask = np.arange(lens.max()) < lens[:,None]
-
-    # Setup output array and put elements from data into masked positions
-    out = np.zeros(mask.shape, dtype=data.dtype)
-    out[mask] = np.concatenate(data)
-    return out
-
-def chunks_ish(data, n_chunks=2, boxsize=3):
-    
-    sz = np.shape(data)
-    
-    boxend = int(boxsize - np.ceil(boxsize/2))
-    
-    ### X AXIS ###
-    # first, sort by x axis:
-    data = data[:, data[0].argsort()]
-    print(data)
-    # we then need to divide data along rows into n_chunks, while retaining some 'overlap'
-    # these chunks will go into a new numpy array dimension
-          
-    # sz_chunks = sz[1]/n_chunks + boxend
-    
-   
-    data = np.split(data, np.where(data[0, :] < (1/n_chunks)*data[0].max())[0][1:])
-    
+"""
+This program:
+- builds a 3D PSF with sig_z = 3*sig_xy
+- calculates the percentage of signal within the volume enclosed by a distance of 1xsigma from the mean
+(which should be very high)
+Thus this program is basically a volume integral that consitutes a sanity check
+"""
 
 
+# This is a 1D gaussian with variable x
+def gauss(sig):
+    f = lambda x: np.exp(-x ** 2 / (2 * sig ** 2))
 
-    
-    return data
-
-    
-    
-    
-data = np.random.randint(0 , 100, 30).reshape(3, 10)
-print(data)
-data = chunks_ish(data, 2)
-print(data)
+    return f
 
 
+# The sigmas and the intensity
+sig_x = 1
+sig_y = 1
+sig_z = 3
+intensity = 1
 
+# intensity scaler
+intensity *= (((2 * np.pi) ** 1.5) * sig_x * sig_y * sig_z) ** -1
 
+# integral (area) calculation along each dimension for range of 1 sigma
+integral_x = integrate.quad(gauss(sig_x), -sig_x, sig_x)
+integral_y = integrate.quad(gauss(sig_y), -sig_y, sig_y)
+integral_z = integrate.quad(gauss(sig_z), -sig_z, sig_z)
+
+# integral along each dimension for boundless area
+integral_x_inf = integrate.quad(gauss(sig_x), -np.inf, np.inf)
+integral_y_inf = integrate.quad(gauss(sig_y), -np.inf, np.inf)
+integral_z_inf = integrate.quad(gauss(sig_z), -np.inf, np.inf)
+
+# bringing it together to find the volume
+gaussian_siglim = intensity * integral_x[0] * integral_y[0] * integral_z[0]
+gaussian_inflim = intensity * integral_x_inf[0] * integral_y_inf[0] * integral_z_inf[0]
+
+print("The volume encloses ", gaussian_siglim, " within 1 sigma.")
+print("The volume encloses ", gaussian_inflim, " when unbounded.")
+print("Thus the ratio of the total volume enclosed by 1 sigma is ", gaussian_siglim / gaussian_inflim)

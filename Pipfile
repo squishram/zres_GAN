@@ -9,6 +9,9 @@ numpy = "*"
 torch = "*"
 torchvision = "*"
 tifffile = "*"
+scipy = "*"
+matplotlib = "*"
+ipython = "*"
 
 [dev-packages]
 

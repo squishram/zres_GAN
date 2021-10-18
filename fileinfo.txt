@@ -1,0 +1,7 @@
+token for github
+20/9/21
+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
+
+location of venv
+/home/ishan/.local/share/virtualenvs/zres_GAN-qw4eYICi
+

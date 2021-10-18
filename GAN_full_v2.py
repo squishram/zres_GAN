@@ -13,6 +13,13 @@ from torchvision.utils import save_image, make_grid
 from time import time
 from pathlib import Path
 
+"""
+Things I'm doing with this version:
+- forming the dataloader as greyscale images
+- Changing the latent vector into a latent matrix
+- Using a downscaled version of the real dataset as the latent matrix
+"""
+
 # begin timer
 t1 = time()
 
@@ -42,16 +49,19 @@ size_img = 64
 # nc - number of color channels in the input images.
 # For color images this is =3, for BW images it's =1
 nc = 3
-# nz - length of latent vector (this is the random noise from which the fake image is generated)
-n_latent = 100
+# NOTE: here we are using a square latent matrix of side length = size_latent
+# size_latent - length of latent vector (this is the random noise from which the fake image is generated)
+size_latent = size_img/2
 # ngf - relates to the depth of feature maps carried through the generator
 ngf = 64
 # ndf - sets the depth of feature maps propagated through the discriminator
 ndf = 64
 # number of training epochs to run
-n_epochs = 60
-# lr - learning rate for training. As described in the DCGAN paper, this number should be 0.0002
-lr = 0.0002
+n_epochs = 2
+# lr - learning rate for training.
+# According to the DCGAN paper, this number should be 2e-4
+# However, developers swear by lr=3e-4 for the Adam optimiser
+lr = 3e-4
 # beta1 - beta1 hyperparameter for Adam optimizers. As described in paper, this number should be 0.5
 beta1 = 0.5
 
@@ -71,9 +81,10 @@ class Generator(nn.Module):
     def __init__(self, ngpu):
         super(Generator, self).__init__()
         self.ngpu = ngpu
-        self.main = nn.Sequential(
-            # input is Z, going into a convolution
-            nn.ConvTranspose2d(n_latent, ngf * 8, 4, 1, 0, bias=False),
+        self.disc = nn.Sequential(
+            # input is latent, going into a convolutional transpose layer (increases dimensions)
+            # nn.ConvTranspose2d(channels_in, channels_out, size_kernel, stride, padding, output_padding
+            nn.ConvTranspose2d(size_latent, ngf * 8, 4, 1, 0, bias=False),
             nn.BatchNorm2d(ngf * 8),
             nn.ReLU(True),
             # state size. (ngf*8) x 4 x 4
@@ -95,14 +106,14 @@ class Generator(nn.Module):
         )
 
     def forward(self, input):
-        return self.main(input)
+        return self.disc(input)
 
 
 class Discriminator(nn.Module):
     def __init__(self, ngpu):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
-        self.main = nn.Sequential(
+        self.gen = nn.Sequential(
             # input is (nc) x 64 x 64
             nn.Conv2d(in_channels=nc, out_channels=ndf, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
@@ -124,7 +135,7 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input):
-        return self.main(input)
+        return self.gen(input)
 
 
 def denorm(img_tensors):
@@ -139,14 +150,15 @@ def save_samples(index, latent_tensors, path):
     print('Saving', fake_fname)
 
 
+transform = tt.Compose([tt.Grayscale(),
+                        tt.Resize(size_img),
+                        tt.CenterCrop(size_img),
+                        tt.ToTensor(),
+                        tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),])
+
 # We can use an image folder dataset the way we have it setup.
 # Create the dataset
-dataset = dset.ImageFolder(path_data,
-                           transform=tt.Compose([
-                               tt.Resize(size_img),
-                               tt.CenterCrop(size_img),
-                               tt.ToTensor(),
-                               tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ]))
+dataset = dset.ImageFolder(path_data, transform=transform)
 
 # Create the dataloader
 dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
@@ -199,7 +211,7 @@ criterion = nn.BCELoss()
 
 # Create batch of latent vectors that we will use to visualize
 # the progression of the generator
-fixed_latent = torch.randn(64, n_latent, 1, 1, device=device)
+fixed_latent = torch.randn(64, size_latent, 1, 1, device=device)
 
 # Establish convention for real and fake labels during training
 real_label = 1.
@@ -244,7 +256,7 @@ for epoch in range(n_epochs):
 
         # Train with all-fake batch #
         # Generate batch of latent vectors
-        noise = torch.randn(b_size, n_latent, 1, 1, device=device)
+        noise = torch.randn(b_size, size_latent, 1, 1, device=device)
         # Generate fake image batch with G
         fake = netG(noise)
         label.fill_(fake_label)

@@ -24,9 +24,9 @@ random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 
 # path_data - the path to the root of the dataset folder
-path_data = os.path.join(os.getcwd(), "catface/")
+path_data = os.path.join(os.getcwd(), "images/")
 # make a directory for the generated images
-dir_samples = Path("images/generated/")
+dir_samples = Path("catface/generated/")
 # this is the full path for the sample images
 path_samples = os.path.join(path_data, dir_samples)
 os.makedirs(path_samples, exist_ok=True)
@@ -308,4 +308,4 @@ plt.show()
 t2 = time()
 
 print("Congrats! Training completed. It took " + str((t2-t1)/60) + " minutes to complete.")
-print("You used a batch size of " + str(size_batch) + " and trained for" + str(n_epochs) + " epochs.")
+print("You used a batch size of " + str(size_batch) + " and trained for " + str(n_epochs) + " epochs.")

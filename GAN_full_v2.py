@@ -48,7 +48,7 @@ size_batch = 128
 size_img = 64
 # nc - number of color channels in the input images.
 # For color images this is =3, for BW images it's =1
-nc = 3
+nc = 1
 # NOTE: here we are using a square latent matrix of side length = size_latent
 # size_latent - length of latent vector (this is the random noise from which the fake image is generated)
 size_latent = size_img/2
@@ -150,16 +150,22 @@ def save_samples(index, latent_tensors, path):
     print('Saving', fake_fname)
 
 
-transform = tt.Compose([tt.Grayscale(),
-                        tt.Resize(size_img),
-                        tt.CenterCrop(size_img),
-                        tt.ToTensor(),
-                        tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),])
+# ensure images are in grayscale if only one colour channel desired
+if nc == 1:
+    transform = tt.Compose([tt.Grayscale(),
+                            tt.Resize(size_img),
+                            tt.CenterCrop(size_img),
+                            tt.ToTensor(),
+                            tt.Normalize((0.5,), (0.5,)), ])
+else:
+    transform = tt.Compose([tt.Resize(size_img),
+                            tt.CenterCrop(size_img),
+                            tt.ToTensor(),
+                            tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ])
 
 # We can use an image folder dataset the way we have it setup.
 # Create the dataset
 dataset = dset.ImageFolder(path_data, transform=transform)
-
 # Create the dataloader
 dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
 
@@ -199,11 +205,15 @@ netD = Discriminator(n_gpu).to(device)
 if (device.type == 'cuda') and (n_gpu > 1):
     netD = nn.DataParallel(netD, list(range(n_gpu)))
 # Apply the weights_init function to randomly initialize all weights
-#  to mean=0, stdev=0.2.
+# to mean=0, stdev=0.2.
 netD.apply(weights_init)
 # Print the model
 print(netD)
 
+
+#########################
+# Losses and Optimisers #
+#########################
 
 # Initialise BCELoss function
 # criterion == "loss", i.e. how do you calculate by how much the network needs to improve
@@ -213,17 +223,19 @@ criterion = nn.BCELoss()
 # the progression of the generator
 fixed_latent = torch.randn(64, size_latent, 1, 1, device=device)
 
-# Establish convention for real and fake labels during training
+# Establish labelling convention for 'real' and 'fake' during training
 real_label = 1.
 fake_label = 0.
 
 # Setup Adam optimizers for both G and D
 # optimiser == 'how do you decide what kind of step you take for each chunk of gradient descent'
-optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
-optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
+optimiserD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
+optimiserG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
 
 
-# TRAINING LOOP TIME!
+############################
+# Initialise Training Loop #
+############################
 
 # Lists to keep track of progress
 img_list = []
@@ -270,7 +282,7 @@ for epoch in range(n_epochs):
         # Compute error of D as sum over the fake and the real batches
         errD = errD_real + errD_fake
         # Update D
-        optimizerD.step()
+        optimiserD.step()
 
         ###############################################
         # (2) Update Generator: maximise log(D(G(z))) #
@@ -285,7 +297,7 @@ for epoch in range(n_epochs):
         errG.backward()
         D_G_z2 = output.mean().item()
         # Update G
-        optimizerG.step()
+        optimiserG.step()
 
         # Output training stats
         if i % 50 == 0:

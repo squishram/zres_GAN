@@ -12,6 +12,7 @@ tifffile = "*"
 scipy = "*"
 matplotlib = "*"
 ipython = "*"
+tensorboard = "*"
 
 [dev-packages]
 

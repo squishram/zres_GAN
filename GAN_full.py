@@ -290,7 +290,6 @@ for epoch in range(n_epochs):
             # with torch.no_grad():
             #    fake = netG(fixed_latent).detach().cpu()
             # img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
-
             save_samples(epoch + iters + 1, fixed_latent, path_samples)
 
         iters += 1

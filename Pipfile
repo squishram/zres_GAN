@@ -13,6 +13,7 @@ scipy = "*"
 matplotlib = "*"
 ipython = "*"
 tensorboard = "*"
+tqdm = "*"
 
 [dev-packages]
 

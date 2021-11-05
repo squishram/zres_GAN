@@ -96,7 +96,7 @@ class downsample(nn.Module):
 # takes in a module and a bool on/off
 # if on, allows training for that module
 # if off, turns training off
-def set_training_mode(module: torch.nn.Module, train: bool)->None:
+def set_training_mode(module: torch.nn.Module, train: bool) -> None:
     """Sets both batchnorms etc and gradients"""
     for param in module.parameters():
         param.requires_grad = train

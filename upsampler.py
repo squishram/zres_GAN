@@ -13,18 +13,21 @@ import torchvision.datasets as dset
 import torchvision.transforms as tt
 import torchvision.utils as utils
 from upsampler_funcs import Generator, initialise_weights
+from datetime import date
 
 
-# DATA #
+# STORAGE #
+# get the date
+today = str(date.today())
 # path_data - the path to the root of the dataset folder
 path_data = os.path.join(os.getcwd(), "images/")
 # make a directory for the generated images
 dir_samples = Path("catface/generated/")
 # this is the full path for the sample images
-path_samples = os.path.join(path_data, dir_samples)
+path_samples = os.path.join(path_data, dir_samples, today)
 os.makedirs(path_samples, exist_ok=True)
 
-# Hyperparameters etc.
+# (HYPER)PARAMETERS #
 # use gpu if available, otherwise cpu
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate for DCGAN
@@ -33,15 +36,25 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 learning_rate = 3e-4
 # batch size, i.e. forward passes per backward propagation
 size_batch = 128
-# side length of images
+# side length of (square) images
 size_img = 64
 # number of colour channels (1=grayscale, 3=RGB)
 n_colour_channels = 3
 # number of epochs i.e. number of times you re-use the same training images in total
 n_epochs = 5
 # the channel depth of the hidden layers of the generator will be in integers of this number
-features_generator = 64
-n_workers = 2
+features_generator = 32
+# the side length of the convolutional kernel in the network
+kernel_size = 3
+# the amount of padding needed to leave the image dimensions unchanged is given by the kernel size
+# NOTE: only works if kernel_size % 2 == 1
+if kernel_size % 2 == 1:
+    padding = int((kernel_size - 1) / 2)
+else:
+    padding = int(kernel_size / 2)
+# how much of the total dataset will be used for training?
+# the 'test dataset' will be = 1 - train_portion
+train_portion = 0.9
 
 if n_colour_channels == 1:
     transform = tt.Compose([tt.Grayscale(),
@@ -55,10 +68,25 @@ else:
                             tt.ToTensor(),
                             tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ])
 
-# Create the dataset
+
+############################
+# DATASETS AND DATALOADERS #
+############################
+
+# first pull out the whole dataset
 dataset = dset.ImageFolder(path_data, transform=transform)
-# Create the dataloader
-dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
+# split into training and testing datasets according to fraction train_portion
+train_size = int(train_portion * len(dataset))
+test_size = len(dataset) - train_size
+trainset, testset = torch.utils.data.random_split(dataset, [train_size, test_size])
+# stick them into dataloaders for training and testing
+trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True, train=True)
+testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_workers=2, pin_memory=True, train=False)
+
+
+#################################
+# INITIALISE THE ACTUAL NETWORK #
+#################################
 
 # A class object describes a format for an 'instance'
 # e.g. we may have the class 'Tshirt(size)'
@@ -66,29 +94,31 @@ dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_
 # Thus to make use of a class, we use it to create instances
 # In this case, the instances are the generator and discriminator networks
 # this is the instance of the generator
-gen = Generator(n_colour_channels, features_generator).to(device)
+gen = Generator(n_colour_channels, features_generator, kernel_size, padding).to(device)
 initialise_weights(gen)
 
-# the optimiser uses
+# make the pooling function - this downsamples the original image
+# nn.AvgPool2d(side length of pooling kernel, stride)
+pool = nn.AvgPool2d(4, stride=4).to(device)
+
+# the optimiser uses Adam to calculate the steps
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# L1Loss() calculates the loss as the absolute difference in signal value between the output and target pixels
 criterion = nn.L1Loss()
 
-step = 0
-
-# this sets the networks to training mode
+# this sets the network to training mode
 # they should be by default, but it doesn't hurt to have assurance
 gen.train()
 
-
-data_iter = iter(dataloader)
+# pull out some test images to check then
+data_iter = iter(testloader)
 first_images, labels = data_iter.next()
-first_images = torch.tensor(first_images).to(device)
+first_images = first_images.to(device)
 
-pool = nn.AvgPool2d(4, stride=2).to(device)
-
+step = 0
 for epoch in range(n_epochs):
     # Target labels not needed! <3 unsupervised
-    for batch_idx, (real, _) in enumerate(dataloader):
+    for batch_idx, (real, _) in enumerate(trainloader):
         # 'real' are images from the dataset; send them to the GPU
         real = real.to(device)
         # a batch of latent noise from which generator makes the image
@@ -112,11 +142,11 @@ for epoch in range(n_epochs):
         opt_gen.step()
 
         # Print losses
-        if batch_idx % 100 == 0:
-            print(f"Epoch [{epoch + 1}/{n_epochs}] Batch {batch_idx}/{len(dataloader)} \
+        if batch_idx % (len(trainloader) / 2) == 0:
+            print(f"Epoch [{epoch + 1}/{n_epochs}] Batch {batch_idx}/{len(trainloader)} \
                   loss G: {loss_gen:.4f}")
 
-        if (batch_idx % 500 == 0) or ((epoch == n_epochs - 1) and (batch_idx == len(dataloader) - 1)):
+        if (batch_idx % 500 == 0) or ((epoch == n_epochs - 1) and (batch_idx == len(trainloader) - 1)):
             # using the 'with' method in conjunction with no_grad() simply
             # disables grad calculations for the duration of the statement
             # Thus, we can use it to generate a sample set of images without initiating a backpropagation step

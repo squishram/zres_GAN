@@ -47,11 +47,11 @@ class Discriminator(nn.Module):
             nn.Conv2d(channels_img, features_discriminator, kernel_size=kernel_size, padding=padding),
             nn.LeakyReLU(0.2, inplace=True),
             # nn_block(in_channels, out_channels, kernel_size, stride, padding)
-            self.nn_block(features_discriminator * 1, features_discriminator * 2, kernel_size, 1, padding),
-            self.nn_block(features_discriminator * 2, features_discriminator * 4, kernel_size, 1, padding),
-            self.nn_block(features_discriminator * 4, features_discriminator * 8, kernel_size, 1, padding),
-            # After all nn_block img output is 4x4 (Conv2d below makes into 1x1)
-            nn.Conv2d(features_discriminator * 8, 1, kernel_size=4, stride=1, padding=0),
+            self.nn_block(features_discriminator * 1, features_discriminator * 2, kernel_size, 2, padding=0),
+            self.nn_block(features_discriminator * 2, features_discriminator * 4, kernel_size, 2, padding=0),
+            self.nn_block(features_discriminator * 4, features_discriminator * 8, kernel_size, 3, padding=0),
+            # After all nn_block img output is 2x2 (Conv2d below makes into 1x1)
+            nn.Conv2d(features_discriminator * 8, 1, kernel_size=4, stride=2, padding=0),
             nn.Sigmoid(),
         )
 

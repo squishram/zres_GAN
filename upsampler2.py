@@ -43,9 +43,9 @@ n_colour_channels = 3
 # number of epochs i.e. number of times you re-use the same training images in total
 n_epochs = 5
 # the channel depth of the hidden layers of the generator will be in integers of this number
-features_generator = 32
+features_generator = 16
 # the channel depth of the hidden layers of the disriminator will be in integers of this number
-features_disriminator = 32
+features_disriminator = 16
 # the side length of the convolutional kernel in the network
 kernel_size = 3
 # the amount of padding needed to leave the image dimensions unchanged is given by the kernel size
@@ -82,8 +82,8 @@ train_size = int(train_portion * len(dataset))
 test_size = len(dataset) - train_size
 trainset, testset = torch.utils.data.random_split(dataset, [train_size, test_size])
 # stick them into dataloaders for training and testing
-trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True, train=True)
-testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_workers=2, pin_memory=True, train=False)
+trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
+testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
 
 
 #################################
@@ -98,7 +98,8 @@ testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_
 # this is the instance of the generator
 gen = Generator(n_colour_channels, features_generator, kernel_size, padding).to(device)
 initialise_weights(gen)
-dis = Discriminator(n_colour_channels, features_disriminator, kernel_size).to(device)
+# this is the instance of the discriminator
+dis = Discriminator(n_colour_channels, features_disriminator, kernel_size, padding).to(device)
 initialise_weights(dis)
 
 # make the pooling function - this downsamples the original image

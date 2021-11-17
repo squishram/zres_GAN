@@ -47,6 +47,9 @@ features_discriminator = 64
 features_generator = 64
 n_workers = 2
 
+# define the transform for the images
+# this will allow us to create a dataloader with them, within which all images can be managed by the network architecture
+# the if/else statement chooses a transform to train with either greyscale or coloured images
 if n_colour_channels == 1:
     transform = tt.Compose([tt.Grayscale(),
                             tt.Resize(size_img),

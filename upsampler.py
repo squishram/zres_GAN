@@ -44,6 +44,8 @@ n_colour_channels = 3
 n_epochs = 5
 # the channel depth of the hidden layers of the generator will be in integers of this number
 features_generator = 32
+# the channel depth of the hidden layers of the disriminator will be in integers of this number
+features_disriminator = 32
 # the side length of the convolutional kernel in the network
 kernel_size = 3
 # the amount of padding needed to leave the image dimensions unchanged is given by the kernel size
@@ -92,7 +94,7 @@ testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_
 # e.g. we may have the class 'Tshirt(size)'
 # and use it to make an XXL instance of that object, xtra_large_tee = Tshirt(XL)
 # Thus to make use of a class, we use it to create instances
-# In this case, the instances are the generator and discriminator networks
+# In this case, the instances are the generator and disriminator networks
 # this is the instance of the generator
 gen = Generator(n_colour_channels, features_generator, kernel_size, padding).to(device)
 initialise_weights(gen)
@@ -102,9 +104,10 @@ initialise_weights(gen)
 pool = nn.AvgPool2d(4, stride=4).to(device)
 
 # the optimiser uses Adam to calculate the steps
-opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+opt_gen = optim.SGD(gen.parameters(), lr=learning_rate, momentum=0.9)
 # L1Loss() calculates the loss as the absolute difference in signal value between the output and target pixels
-criterion = nn.L1Loss()
+criterion_gen = nn.L1Loss()
 
 # this sets the network to training mode
 # they should be by default, but it doesn't hurt to have assurance
@@ -129,14 +132,14 @@ for epoch in range(n_epochs):
         # i.e. calculate G(z)
         upsampled = gen(downsampled)
 
-        #############################################################
-        # Train Generator: min log(1 - D(G(z))) <-> max log(D(G(z)) #
-        #############################################################
+        ##############################################################
+        # Train Generator: x - G(P(x)) where P is the pooling function
+        ##############################################################
         # the loss is the difference between the real and the upsampled image
-        loss_gen = criterion(upsampled, real)
+        loss_gen = criterion_gen(upsampled, real)
         # do the zero grad thing
         gen.zero_grad()
-        # backpropagation to get the gradient
+        # backpropagation of loss to get the gradient
         loss_gen.backward()
         # take an appropriately sized step (gradient descent)
         opt_gen.step()

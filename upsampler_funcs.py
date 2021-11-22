@@ -40,18 +40,22 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, channels_img, features_discriminator, kernel_size, padding):
+    def __init__(self, channels_img, features_discriminator):
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
-            # input: N x channels_img x 64 x 64
-            nn.Conv2d(channels_img, features_discriminator, kernel_size=kernel_size, padding=padding),
+            # each conv2d halves the size of the image
+            # img_dimensions = 64 x 64 x colour_channels
+            nn.Conv2d(channels_img, features_discriminator, kernel_size=3, padding=0),
             nn.LeakyReLU(0.2, inplace=True),
-            # nn_block(in_channels, out_channels, kernel_size, stride, padding)
-            self.nn_block(features_discriminator * 1, features_discriminator * 2, kernel_size, 2, padding=0),
-            self.nn_block(features_discriminator * 2, features_discriminator * 4, kernel_size, 2, padding=0),
-            self.nn_block(features_discriminator * 4, features_discriminator * 8, kernel_size, 3, padding=0),
-            # After all nn_block img output is 2x2 (Conv2d below makes into 1x1)
-            nn.Conv2d(features_discriminator * 8, 1, kernel_size=4, stride=2, padding=0),
+            # img_dimensions = 32 x 32 x features_discriminator
+            self.nn_block(features_discriminator * 1, features_discriminator * 2, 3, 2, 0),
+            # img_dimensions = 16 x 16 x features_discriminator * 2
+            self.nn_block(features_discriminator * 2, features_discriminator * 4, 3, 2, 0),
+            # img_dimensions = 8 x 8 x features_discriminator * 4
+            self.nn_block(features_discriminator * 4, features_discriminator * 8, 3, 2, 0),
+            # img_dimensions = 4 x 4 x features_discriminator * 8
+            nn.Conv2d(features_discriminator * 8, 1, kernel_size=4, stride=1, padding=0),
+            # img_dimensions = 1 x 1 x 1
             nn.Sigmoid(),
         )
 

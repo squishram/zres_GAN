@@ -99,4 +99,3 @@ def check_success(loader, model, device):
         print(f'Got {n_correct}/{n_samples} with accuracy {(n_correct/n_samples) * 100}')
 
 
-

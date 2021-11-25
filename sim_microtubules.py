@@ -1,5 +1,3 @@
-import gc
-gc.collect()
 import random as r
 import numpy as np
 from time import time

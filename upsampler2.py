@@ -10,7 +10,6 @@ import matplotlib.pylab as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-# import torchvision
 import torchvision.datasets as dset
 import torchvision.transforms as tt
 import torchvision.utils as utils
@@ -23,11 +22,10 @@ from datetime import date
 today = str(date.today())
 # path_data - the path to the root of the dataset folder
 path_data = os.path.join(os.getcwd(), "images/")
-# make a directory for the generated images
-dir_samples = Path("catface/generated/")
 # this is the full path for the sample images
-path_samples = os.path.join(path_data, dir_samples, today)
-os.makedirs(path_samples, exist_ok=True)
+path_real = os.path.join(path_data, Path("catface/real/"))
+path_gens = os.path.join(path_data, Path("catface/generated/"), today)
+os.makedirs(path_gens, exist_ok=True)
 
 # (HYPER)PARAMETERS #
 # use gpu if available, otherwise cpu
@@ -78,14 +76,14 @@ else:
 ############################
 
 # first pull out the whole dataset
-dataset = dset.ImageFolder(path_data, transform=transform)
+dataset = dset.ImageFolder(path_real, transform=transform)
 # split into training and testing datasets according to fraction train_portion
 train_size = int(train_portion * len(dataset))
 test_size = len(dataset) - train_size
 trainset, testset = torch.utils.data.random_split(dataset, [train_size, test_size])
 # stick them into dataloaders for training and testing
-trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, pin_memory=True)
-testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, pin_memory=True)
+trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
+testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
 
 
 #################################
@@ -111,7 +109,7 @@ pool = nn.AvgPool2d(4, stride=4).to(device)
 # the optimiser uses Adam to calculate the steps
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-# BCELoss() == Binary Cross Entropy Loss
+# BCELoss() == Binary Cross Entropy Loss; L1Loss == target - output
 criterion_bce = nn.BCELoss()
 criterion_L1 = nn.L1Loss()
 
@@ -129,7 +127,6 @@ first_images = first_images.to(device)
 step = 0
 # this list contains the losses, [step, loss_dis_real, loss_dis_fake, loss_dis, loss_gen]
 loss_list = [[] for i in range(7)]
-
 for epoch in range(n_epochs):
     # Target labels not needed! <3 unsupervised
     for batch_idx, (real, _) in enumerate(trainloader):
@@ -174,9 +171,9 @@ for epoch in range(n_epochs):
         # take an appropriately sized step (gradient descent)
         opt_dis.step()
 
-        #############################################################
-        # Train Generator: min log(1 - D(G(z))) <-> max log(D(G(z)) #
-        #############################################################
+        ####################################
+        # Train Generator: max log(D(G(z)) #
+        ####################################
 
         # pass the fake images through the discriminator i.e. calculate D(G(z))
         # reshape(-1) ensures the output is in a single column
@@ -186,8 +183,9 @@ for epoch in range(n_epochs):
         # (the 'Train Generator' equation above)
         # torch.zeros_like(input) <-> torch.ones(input.size())
         loss_gen_bce = criterion_bce(output, torch.ones_like(output))
-        # obtain 'another' loss by calculating the pixel-pixel difference between the original image and the upsampled image
+        # obtain the L1 loss as the difference between the real and upsampled
         loss_gen_L1 = criterion_L1(upsampled, real)
+        # the total generator loss is the sum of these
         loss_gen = loss_gen_bce + loss_gen_L1
         # do the zero grad thing
         gen.zero_grad()
@@ -196,8 +194,6 @@ for epoch in range(n_epochs):
         # take an appropriately sized step (gradient descent)
         opt_gen.step()
 
-
-        # Print losses
         if step % 100 == 0:
             loss_list[0].append(int(step))
             loss_list[1].append(float(loss_dis_fake))
@@ -206,12 +202,14 @@ for epoch in range(n_epochs):
             loss_list[4].append(float(loss_gen_bce))
             loss_list[5].append(float(loss_gen_L1))
             loss_list[6].append(float(loss_gen))
-            
+
+        # count the number of backpropagations
         step += 1
 
     # using the 'with' method in conjunction with no_grad() simply
     # disables grad calculations for the duration of the statement
-    # Thus, we can use it to generate a sample set of images without initiating a backpropagation step
+    # Thus, we can use it to generate a sample set of images without initiating
+    # a backpropagation calculation
     with torch.no_grad():
         downsampled = pool(first_images)
         upsampled = gen(downsampled)
@@ -219,16 +217,15 @@ for epoch in range(n_epochs):
         upsampled *= 0.5
         upsampled += 0.5
         # name your image grid according to which training iteration it came from
-        fake_fname = 'generated_images_epoch-{0:0=2d}.png'.format(epoch)
+        fake_fname = 'generated_images_epoch-{0:0=2d}.png'.format(epoch + 1)
         # make a grid i.e. a sample of generated images to look at
         img_grid_fake = utils.make_grid(upsampled[:32], normalize=True)
-        utils.save_image(upsampled, os.path.join(path_samples, fake_fname), nrow=8)
-        print('Saving', fake_fname)
-
-    # print progress (number of epochs completed)
-    print(f"Epoch [{epoch + 1}/{n_epochs}]")
+        utils.save_image(upsampled, os.path.join(path_gens, fake_fname), nrow=8)
+        # Print losses
+        print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {fake_fname}")
 
 
+# plot out all the losses for examination!
 plt.plot(loss_list[0], loss_list[1])
 plt.plot(loss_list[0], loss_list[2])
 plt.plot(loss_list[0], loss_list[3])
@@ -237,8 +234,9 @@ plt.plot(loss_list[0], loss_list[5])
 plt.plot(loss_list[0], loss_list[6])
 plt.xlabel('Backpropagation Count')
 plt.ylabel('Total Loss')
-plt.legend(['loss_dis_real', 'loss_dis_fake', 'loss_dis', 'loss_gen_bce', 'loss_gen_L1', 'loss_gen'], loc='upper left')
+plt.legend(['loss_dis_real', 'loss_dis_fake', 'loss_dis', 'loss_gen_bce',
+            'loss_gen_L1', 'loss_gen'], loc='upper left')
 
 print("Saving loss graph...")
-plt.savefig(os.path.join(path_samples, 'losses.pdf'), format='pdf', path=path_samples)
+plt.savefig(os.path.join(path_gens, 'losses'), format='pdf')
 print("Done!")

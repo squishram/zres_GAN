@@ -15,6 +15,7 @@ ipython = "*"
 tensorboard = "*"
 tqdm = "*"
 flake8 = "*"
+albumentations = "*"
 
 [dev-packages]
 

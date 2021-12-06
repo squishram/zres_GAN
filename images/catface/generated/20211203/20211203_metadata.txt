@@ -1,0 +1,8 @@
+upsampler2.py
+learning_rate = 0.0003
+size_batch = 128
+size_img = 64
+n_colour_channels = 3
+n_epochs = 5
+features_generator = 16
+features_discriminator = 16

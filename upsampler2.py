@@ -1,6 +1,6 @@
 """
-Training of DCGAN network on MNIST dataset with Discriminator
-and Generator imported from DCGAN_AP_funcs.py
+A GAN that increases image resolution
+Networks imported as classes from upsampler_funcs
 """
 
 import os
@@ -20,6 +20,7 @@ from datetime import date
 # STORAGE #
 # get the date
 today = str(date.today())
+today = today.replace('-', '')
 # path_data - the path to the root of the dataset folder
 path_data = os.path.join(os.getcwd(), "images/")
 # this is the full path for the sample images
@@ -44,8 +45,8 @@ n_colour_channels = 3
 n_epochs = 5
 # the channel depth of the hidden layers of the generator will be in integers of this number
 features_generator = 16
-# the channel depth of the hidden layers of the disriminator will be in integers of this number
-features_disriminator = 16
+# the channel depth of the hidden layers of the discriminator will be in integers of this number
+features_discriminator = 16
 # the side length of the convolutional kernel in the network
 kernel_size = 3
 # the amount of padding needed to leave the image dimensions unchanged is given by the kernel size
@@ -57,6 +58,7 @@ else:
 # how much of the total dataset will be used for training?
 # the 'test dataset' will be = 1 - train_portion
 train_portion = 0.9
+
 
 if n_colour_channels == 1:
     transform = tt.Compose([tt.Grayscale(),
@@ -91,17 +93,14 @@ testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_
 #################################
 
 # A class object describes a format for an 'instance'
-# e.g. we may have the class 'Tshirt(size)'
-# and use it to make an XXL instance of that object, xtra_large_tee = Tshirt(XL)
+# e.g. we may have the class 'T-shirt(size)'
+# and make an XXL instance of that object, extra_large_tee = T-shirt(XXL)
 # Thus to make use of a class, we use it to create instances
-# In this case, the instances are the generator and disriminator networks
-# this is the instance of the generator
+# In this case, the instances are the generator and discriminator networks
 gen = Generator(n_colour_channels, features_generator, kernel_size, padding).to(device)
 initialise_weights(gen)
-# this is the instance of the discriminator
-dis = Discriminator(n_colour_channels, features_disriminator).to(device)
+dis = Discriminator(n_colour_channels, features_discriminator).to(device)
 initialise_weights(dis)
-
 # make the pooling function - this downsamples the original image
 # nn.AvgPool2d(side length of pooling kernel, stride)
 pool = nn.AvgPool2d(4, stride=4).to(device)
@@ -144,7 +143,7 @@ for epoch in range(n_epochs):
         # Train Discriminator: max log(D(x)) + log(1 - D(G(z)))#
         ########################################################
 
-        # pass the real images through the disriminator i.e. calculate D(x)
+        # pass the real images through the discriminator i.e. calculate D(x)
         # reshape(-1) ensures the output is in a single column
         dis_real = dis(real).reshape(-1)
         # obtain the loss by passing dis_real through the BCELoss function
@@ -152,7 +151,7 @@ for epoch in range(n_epochs):
         # (the first term of the 'Train Discriminator' equation above)
         loss_dis_real = criterion_bce(dis_real, torch.ones_like(dis_real))
 
-        # pass the fake images through the disriminator i.e. calculate D(G(z))
+        # pass the fake images through the discriminator i.e. calculate D(G(z))
         # reshape(-1) ensures the output is in a single column
         # tensor.detach() is used because loss.backward() clears the gradients from the fakes (G(z)) to save memory
         # but we want to reuse the fakes to calculate the generator loss, so .detach() preserves them
@@ -225,18 +224,40 @@ for epoch in range(n_epochs):
         print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {fake_fname}")
 
 
+# make a metadata file
+metadata = today + "_metadata.txt"
+metadata = os.path.join(path_gens, metadata)
+# make sure to remove any other metadata files in the subdirectory
+if os.path.exists(metadata):
+  os.remove(metadata)
+# metadata = open(metadata, "a")
+with open(metadata, "a") as file:
+        file.writelines([os.path.basename(__file__),
+                         "\nlearning_rate = " + str(learning_rate),
+                         "\nsize_batch = " + str(size_batch),
+                         "\nsize_img = " + str(size_img),
+                         "\nn_colour_channels = " + str(n_colour_channels),
+                         "\nn_epochs = " + str(n_epochs),
+                         "\nfeatures_generator = " + str(features_generator),
+                         "\nfeatures_discriminator = " + str(features_discriminator)])
+# make sure to add more about the network structures!
+
+
 # plot out all the losses for examination!
-plt.plot(loss_list[0], loss_list[1])
-plt.plot(loss_list[0], loss_list[2])
-plt.plot(loss_list[0], loss_list[3])
-plt.plot(loss_list[0], loss_list[4])
-plt.plot(loss_list[0], loss_list[5])
-plt.plot(loss_list[0], loss_list[6])
+for i in range(len(loss_list) - 1):
+    plt.plot(loss_list[0], loss_list[i])
+
 plt.xlabel('Backpropagation Count')
 plt.ylabel('Total Loss')
-plt.legend(['loss_dis_real', 'loss_dis_fake', 'loss_dis', 'loss_gen_bce',
-            'loss_gen_L1', 'loss_gen'], loc='upper left')
+plt.legend(['loss_dis_real',
+            'loss_dis_fake',
+            'loss_dis',
+            'loss_gen_bce',
+            'loss_gen_L1',
+            'loss_gen'],
+            loc='upper left')
 
 print("Saving loss graph...")
 plt.savefig(os.path.join(path_gens, 'losses'), format='pdf')
+
 print("Done!")

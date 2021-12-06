@@ -1,0 +1,1 @@
+learning_rate = 0.0003size_batch = 128size_img = 64n_colour_channels = 3n_epochs = 5features_generator = 16features_discriminator = 16

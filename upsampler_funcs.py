@@ -73,13 +73,15 @@ class Discriminator(nn.Module):
         return self.disc(x)
 
 
-# THIS IS WHAT I NEED TO UNDERSTAND #
+#TODO THIS IS WHAT I NEED TO UNDERSTAND #
 def initialise_weights(model):
     for m in model.modules():
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
             nn.init.normal_(m.weight.data, 0.0, 0.02)
 
 
+# This isn't actually being used yet
+# Ultimately will be checking the hit rate of the network
 def check_success(loader, model, device):
     n_samples = 0
     n_correct = 0

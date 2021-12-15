@@ -7,32 +7,44 @@ from torch import nn
 from torchvision.models import vgg19
 import srgan_config
 
-# A factory that churns out generators:
+
+# This is a convolutional layer ('block')
+# that appears in both the Generator and the Discriminator
 class ConvBlock(nn.Module):
     # kwargs == key work arguments eg kernel size etc
     def __init__(self, in_channels, out_channels, is_disc=False, use_act=True, use_bn=True, **kwargs):
         super().__init__()
         self.use_act = use_act
+        # this is the convolutional layer
         self.cnn = nn.Conv2d(in_channels, out_channels, **kwargs, bias=not use_bn)
+        # this is the normalisation layer
+        # it will only be applied is use_bn is True
+        # otherwise it will apply an identity transformation
+        # (i.e. one that does nothing)
         self.bn = nn.BatchNorm2d(out_channels) if use_bn else nn.Identity()
-        self.act = (
-            nn.LeakyReLU(0.2, inplace=True) if is_disc
-            else nn.PReLU(num_parameters=out_channels)
-        )
+        # This is the ReLU layer for removing negative values
+        # it uses a LeakyReLU for the Discriminator
+        # it uses a Parametric ReLU for the Generator
+        self.act = (nn.LeakyReLU(0.2, inplace=True) if is_disc
+                    else nn.PReLU(num_parameters=out_channels))
 
+    # forward pass that is sensitive to conditionals
+    # i.e. whether ReLU layer is used
     def forward(self, x):
         return self.act(self.bn(self.cnn(x))) if self.use_act else self.bn(self.cnn(x))
 
 
-
+# This is an upsampling block
 class UpsampleBlock(nn.Module):
     def __init__(self, in_c, scale_factor):
         super().__init__()
+        # This is the convolutional layer
         self.conv = nn.Conv2d(in_c, in_c*scale_factor ** 2, 3, 1, 1)
         # PixelShuffle distributes channels into the height and width
         # so in this case the dimensions change like this:
         # C * W * H --> C/4 * 2W * 2H
         self.ps = nn.PixelShuffle(scale_factor)
+        # Parametric ReLU layer
         self.act = nn.PReLU(num_parameters=in_c)
 
     def forward(self, x):
@@ -115,7 +127,6 @@ class Discriminator(nn.Module):
         return self.classifier(x)
 
 
-
 # phi_5,4 5th conv layer before maxpooling but after activation
 class VGGLoss(nn.Module):
     def __init__(self):
@@ -132,7 +143,6 @@ class VGGLoss(nn.Module):
         return self.loss(vgg_input_features, vgg_target_features)
 
 
-#TODO THIS IS WHAT I NEED TO UNDERSTAND #
 def initialise_weights(model):
     for m in model.modules():
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
@@ -159,6 +169,7 @@ def check_success(loader, model, device):
 
         print(f'Got {n_correct}/{n_samples} with accuracy {(n_correct/n_samples) * 100}')
 
+
 def test_structure():
     low_res = 24
     with torch.cuda.amp.autocast():
@@ -170,6 +181,7 @@ def test_structure():
 
         print(gen_out.shape)
         print(disc_out.shape)
+
 
 if __name__ == "__main__":
     test_structure()

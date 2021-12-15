@@ -1,20 +1,20 @@
 import gc
+
+gc.collect()
 import random as r
 import numpy as np
 from time import time
 from tifffile import imsave
 import torch
-gc.collect()
 
 """
 This code generates 3D images of simulated microtubules. Workflow:
-1. Uses a 3D random walk with constant step sizes
-and limited 'turn sharpness' to generate coordinates
+1. Uses a 3D random walk with constant step sizes and limited 'turn sharpness' to generate coordinates
 2. Creates an empty 3 dimensional array
-3. Sums up all gaussian contributions to each pixel in 'patches'
-   i.e volume subsections of the final image
-4. Scales up the signal to match the desired image bittage
-and saves the final array as a tiff
+3. Uses a pooling-style approach to convert the random walk coordinates into array 'signal' values.
+   This is done by convolving each coordinate with a gaussian to simulate the PSF. 
+   Signal is then pooled from a surrounding patch of pre-determined size into the central voxel
+4. Scales up the signal to match the desired image bittage and saves the final array as a tiff
 
 
 To do:
@@ -59,7 +59,6 @@ def rotation_matrix(axis, angle):
 
     return rotmat
 
-
 def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
     """
     Sets up a random walk in three dimensions:
@@ -78,6 +77,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
 
     # unit vectors:
     i = np.array([1, 0, 0])
+    j = np.array([0, 1, 0])
     k = np.array([0, 0, 1])
 
     # this is the step along each axis
@@ -99,8 +99,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
         y[q] = y[q - 1] + v[1]
         z[q] = z[q - 1] + v[2]
 
-        # if the microtubule leaves the imaging area
-        # just re-initialize it somewhere else:
+        # if the microtubule leaves the imaging area, just re-initialize it somewhere else:
         if (((x[q] > (size_img[0] + 1)) or (x[q] < -1))
                 or ((y[q] > (size_img[1] + 1)) or (y[q] < -1))
                 or ((z[q] > (size_img[2] + 1)) or (z[q] < -1))):
@@ -111,17 +110,16 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
             # new random first step:
             v = np.random.uniform(-step_size, step_size, 3)
 
-        # if the microtubule is still within the box
-        # its next step must be constrained so it is not too sharp
+        # if the microtubule is still within the box, its next step must be constrained so it is not too sharp
         else:
-            # initialise random polar angle
+            # initialise random polar angle       
             theta = r.uniform(0, sharpest)
             # initialise random azimuthal angle
             phi = r.uniform(0, 2 * np.pi)
             # make the vector unit length
             v = v / np.linalg.norm(v)
 
-            # rotate v about the normal to the plane created by v and i
+            # rotate v about the normal to the plane created by v and i, 
             # unless v is parallel to k, in which case rotate v about i
             if np.dot(v, k) == 1:
                 axis = i
@@ -133,7 +131,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
             # find the azimuth rotation matrix about v1
             r_azi = rotation_matrix(v, phi)
 
-            # apply rotations to create a random vector within an angle of phi
+            # apply random rotations to create a random vector within an angle of phi 
             v = r_azi @ r_pol @ v
 
         # ensure step is consistent length:
@@ -143,7 +141,6 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
     data = np.array(data)
 
     return data
-
 
 def image_of_gaussians(data, size_img, overlap, size_patch=5):
     """
@@ -161,12 +158,11 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
     img = torch.zeros(tuple(size_img))
 
     # the size of each chunk
-    # // is 'floor division' i.e. divide then round down the result
+    # // is 'floor division' i.e. divide then round down the result to the nearest int
     size_patch = np.array([size_img[i] // n_chunks[i] for i in range(3)])
 
     # make an object array to contain all the data inside each chunk
-    # (roughly equivalent to matlab cell array in that
-    # each object/unit/cell can contain anything i.e. an array of any size)
+    # (roughly equivalent to matlab cell array, each object/unit/cell can contain anything i.e. an array of any size)
     chunked_data = np.empty([n_chunks[0], n_chunks[1], n_chunks[2]],
                             dtype=object)
 
@@ -178,6 +174,7 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
 
     # This loop loads up the empty arrays with chunked_data
     for j in range(len(data[0])):
+        # don't need to do this can use the position to do the calculation?
         for x in range(n_chunks[0]):
             xstart = (size_img[0] * x) // n_chunks[0]
             for y in range(n_chunks[1]):
@@ -193,8 +190,9 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                             data[2][j] < zstart - overlap[2] or data[2][j] >=
                             (zstart + size_patch[2] + overlap[2])):
                         continue
-                    # if the point is inside the chunk, append it to that chunk!
-                    chunked_data[x][y][z].append([data[i][j] for i in range(6)])
+                    # if the point is inside the chunk,
+                    # append it to that chunk!
+                    chunked_data[x][y][z].append([data[i][j] for i in range(3)])
 
     # TODO this needs to be fixed to accomodate potentially varying sizes of chunk
     # creates a matrix of indices for each dimension (x, y, and z)
@@ -207,10 +205,6 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
     data = data.T
     data = data.tolist()
     # This loop calculates the contributions from each local gaussian to each chunk
-
-    # csig_z = 1
-    # csig_xy = 1
-    # cintensity = 1
     for x in range(n_chunks[0]):
         xstart = (size_img[0] * x) // n_chunks[0]
         for y in range(n_chunks[1]):
@@ -221,7 +215,7 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                 intensityspot = torch.zeros((size_patch[0], size_patch[1], size_patch[2]))
 
                 # NOTE do we want to include a patch calculation here?
-                for cx, cy, cz, cintensity, csig_xy, csig_z in chunked_data[x][y][z]:
+                for cx, cy, cz in data:
                     # define the normalisation constant for the gaussian
                     const_norm = cintensity / ((csig_xy ** 3) * (2 * np.pi) ** 1.5)
                     # add the gaussian contribution to the spot
@@ -232,19 +226,17 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                 yend = ystart + size_patch[1]
                 zend = zstart + size_patch[2]
                 img[xstart:xend, ystart:yend, zstart:zend] = intensityspot
-
     data = np.array(data)
     data = data.T
 
     return np.array(img)
-
 
 # Initialize timer
 time1 = time()
 
 # file specs:
 # how many images do you want?
-nimg = 1000
+nimg = 1
 # file name root:
 filename = "mtubs_sim_"
 # bittage of final image - 8, 16, 32, or 64?
@@ -252,7 +244,7 @@ img_bit = 32
 
 # image + random walk specs:
 # number of steps per walk:
-t = 5000
+t = 2000
 # size of final image in pixels:
 size_img = np.array([96, 96, 96])
 # step size each iteration (make it <0.5 if you want continuous microtubules):
@@ -260,21 +252,18 @@ max_step = 0.5
 # how sharply can the path bend each step?
 sharpest = (np.pi * max_step) / 10
 
-# PSF specs:
-# What is the mean intensity (in AU) and its uncertainty
-# (as a fraction of the mean value)?
+# PSF specs: 
+# What is the mean intensity (in AU) and its uncertainty (as a fraction of the mean value)?
 intensity_mean = 5
 int_unc = 0.2
-# What is the mean sigma in xy (in voxels) and the sigma uncertainty
-# (as a fraction of the mean value)?
+# What is the mean sigma in xy (in voxels) and the sigma uncertainty (as a fraction of the mean value)?
 sigma_xy_mean = 1
 sig_unc = 0.2
 # What is the mean sigma in z (in voxels)
 sigma_z_mean = 3 * sigma_xy_mean
 
-# how many chunks are we splitting the data into along each dimension?
-# (found to be 5 for 96x96x96 voxels)
-n_chunks = np.array([3, 3, 3])
+# how many chunks are we splitting the data into along each dimension? (found to be 5 for 96x96x96 voxels)
+n_chunks = np.array([5, 5, 5])
 # how much do the chunks overlap?
 overlap = 7 * sigma_xy_mean
 
@@ -282,28 +271,21 @@ for i in range(nimg):
     data = random_walk(t, size_img, max_step, sharpest)
 
     # broadcast intensity & sigma values into distributed arrays
-    intensity = np.array([intensity_mean * (1 + r.uniform(-int_unc, int_unc))
-                         for i in range(len(data[0]))])
-    sigma_xy = np.array([sigma_xy_mean * (1 + r.uniform(-sig_unc, sig_unc))
-                        for i in range(len(data[0]))])
-    sigma_z = np.array([sigma_z_mean * (1 + r.uniform(-sig_unc, sig_unc))
-                       for i in range(len(data[0]))])
+    intensity = np.array([intensity_mean * (1 + r.uniform(-int_unc, int_unc)) for i in range(len(data[0]))])
+    sigma_xy = np.array([sigma_xy_mean * (1 + r.uniform(-sig_unc, sig_unc)) for i in range(len(data[0]))])
+    sigma_z = np.array([sigma_z_mean * (1 + r.uniform(-sig_unc, sig_unc)) for i in range(len(data[0]))])
 
-    # put coordinates, intensity, sigma_xy, sigma_z data into one structure
-    data = np.concatenate(([data[0]], [data[1]], [data[2]], [intensity],
-                           [sigma_xy], [sigma_z]), axis=0)
+    # put all of the coordinates, intensity, sigma_xy, and sigma_z data into a single structure    
+    data = np.concatenate(([data[0]], [data[1]], [data[2]], [intensity], [sigma_xy], [sigma_z]), axis=0)
     data = np.array(data)
 
-    # This function breaks the data into "chunks" for efficiency,
-    # then uses it to 'fill up' the empty image array:
+    # This function breaks the data into "chunks" for efficiency, then uses it to 'fill up' the empty image array:
     mtubs = image_of_gaussians(data, size_img, n_chunks, overlap)
 
-    # normalise all the brightness values
-    # then scale them up so that the brightest value is 255:
+    # normalise all the brightness values, then scale them up so that the brightest value is 255:
     mtubs = (mtubs / np.amax(mtubs)) * 255
 
-    # tiff writing in python gets the axes wrong
-    # rotate the image before writing so it doesn't!
+    # tiff writing in python gets the axes wrong; rotate the image before writing so it doesn't!
     mtubs = np.rot90(mtubs, 1, [0, 2])
     mtubs = np.rot90(mtubs, 1, [1, 2])
 
@@ -322,9 +304,7 @@ time2 = time()
 print("The image size, in voxels, is " + str(size_img))
 print("The overlap, in voxels, is " + str(overlap))
 print("The number of total steps is " + str(t))
-print("the mean xy-sigma is " + str(sigma_xy_mean) +
-      "and the mean z-sigma is " + str(sigma_z_mean))
-print("Done! To make " +
-      str(nimg) + " " + str(img_bit) + "-bit images with " +
-      str(n_chunks[0]) + " chunks/axis only took " +
+print("the mean xy-sigma is " + str(sigma_xy_mean) + ", and the mean z-sigma is " + str(sigma_z_mean))
+print("Done! To make " + str(nimg) + " " + str(img_bit) + "-bit images with " + str(
+    n_chunks[0]) + " chunks/axis only took " +
       str(time2 - time1) + " seconds - wow!")

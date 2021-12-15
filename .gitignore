@@ -1,5 +1,6 @@
 /.vscode
 /_pycache_
-/images/real
+/images/catface/real
+/images/sims
 /logs
 *.swp

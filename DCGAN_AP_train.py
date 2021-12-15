@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
+# import torchvision
 import torchvision.datasets as dset
 import torchvision.transforms as tt
 import torchvision.utils as utils
@@ -35,47 +35,54 @@ learning_rate = 3e-4
 size_batch = 128
 # side length of input and output images
 size_img = 64
-# number of colour channels (1=grayscale, 3=RGB)
-n_colour_channels = 3
+# channel depth of input and output images (1=grayscale, 3=RGB, >4=3D)
+z_axis_pixeldepth = 3
 # length of the noise vector
 size_noise = 100
-# number of epochs i.e. number of times you re-use the same training images in total
+# number of epochs i.e. number of times you re-use the same training images
 n_epochs = 5
-#
+# the channel depth of the hidden layers will be in integers of this number
 features_discriminator = 64
-# the channel depth of the hidden layers of the generator will be in integers of this number
 features_generator = 64
 n_workers = 2
 
 # define the transform for the images
-# this will allow us to create a dataloader with them, within which all images can be managed by the network architecture
-# the if/else statement chooses a transform to train with either greyscale or coloured images
-if n_colour_channels == 1:
+# this will allow us to create a dataloader with them
+# within which all images can be managed by the network architecture
+if z_axis_pixeldepth == 1:
     transform = tt.Compose([tt.Grayscale(),
                             tt.Resize(size_img),
                             tt.CenterCrop(size_img),
                             tt.ToTensor(),
                             tt.Normalize((0.5,), (0.5,)), ])
-else:
+elif z_axis_pixeldepth == 3:
     transform = tt.Compose([tt.Resize(size_img),
                             tt.CenterCrop(size_img),
                             tt.ToTensor(),
                             tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ])
+else:
+    transform = tt.Compose([tt.Resize(size_img),
+                            tt.CenterCrop(size_img),
+                            tt.ToTensor()])
 
 # Create the dataset
 dataset = dset.ImageFolder(path_data, transform=transform)
 # Create the dataloader
-dataloader = torch.utils.data.DataLoader(dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True)
+dataloader = torch.utils.data.DataLoader(dataset,
+                                         size_batch,
+                                         shuffle=True,
+                                         num_workers=n_workers,
+                                         pin_memory=True)
 
 # A class object describes a format for an 'instance'
 # e.g. we may have the class 'Tshirt(size)'
-# and use it to make an XXL instance of that object, xtra_large_tee = Tshirt(XL)
+# & use it to make an XXL instance of that object, xtra_large_tee = Tshirt(XL)
 # Thus to make use of a class, we use it to create instances
 # In this case, the instances are the generator and discriminator networks
 # this is the instance of the generator
-gen = Generator(size_noise, n_colour_channels, features_generator).to(device)
+gen = Generator(size_noise, z_axis_pixeldepth, features_generator).to(device)
 # this is the instance of the discriminator
-disc = Discriminator(n_colour_channels, features_discriminator).to(device)
+disc = Discriminator(z_axis_pixeldepth, features_discriminator).to(device)
 initialise_weights(gen)
 initialise_weights(disc)
 

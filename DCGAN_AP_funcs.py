@@ -2,7 +2,7 @@
 Discriminator and Generator class implementation from DCGAN paper
 """
 
-import torch
+# import torch
 import torch.nn as nn
 
 
@@ -12,10 +12,14 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
             # input: N x channels_img x 64 x 64
-            nn.Conv2d(channels_img, features_discriminator, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(channels_img,
+                      features_discriminator,
+                      kernel_size=4,
+                      stride=2,
+                      padding=1),
             nn.LeakyReLU(0.2, inplace=True),
             # nn_block(in_channels, out_channels, kernel_size, stride, padding)
-            self.nn_block(features_discriminator, features_discriminator * 2, 4, 2, 1),
+            self.nn_block(features_discriminator * 1, features_discriminator * 2, 4, 2, 1),
             self.nn_block(features_discriminator * 2, features_discriminator * 4, 4, 2, 1),
             self.nn_block(features_discriminator * 4, features_discriminator * 8, 4, 2, 1),
             # After all nn_block img output is 4x4 (Conv2d below makes into 1x1)
@@ -67,8 +71,9 @@ class Generator(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-### THIS IS WHAT I NEED TO UNDERSTAND ###
+
 def initialise_weights(model):
     for m in model.modules():
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
             nn.init.normal_(m.weight.data, 0.0, 0.02)
+

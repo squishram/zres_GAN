@@ -5,9 +5,9 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
 
-class MyImageFolder(Dataset):
-    def __init__(self, root_dir):
-        super(MyImageFolder, self).__init__()
+class Custom_Dataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        super(Custom_Dataset, self).__init__()
         self.data = []
         self.root_dir = root_dir
         self.class_names = os.listdir(root_dir)
@@ -31,10 +31,11 @@ class MyImageFolder(Dataset):
 
 
 def test():
-    dataset = MyImageFolder(root_dir="new_data/")
-    loader = DataLoader(dataset, batch_size=1, num_workers=8)
+    dataset = Custom_Dataset(root_dir=os.path.join(os.getcwd(),
+                                                   "images/catface/real/set1/"))
+    dataloader = DataLoader(dataset, batch_size=1, num_workers=2)
 
-    for low_res, high_res in loader:
+    for low_res, high_res in dataloader:
         print(low_res.shape)
         print(high_res.shape)
 

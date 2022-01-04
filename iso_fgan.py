@@ -8,6 +8,7 @@ from tifffile import imsave
 from astropy.nddata import CCDData
 
 
+# define the 'Number' type as being either an integer or a float
 Number = Union[int, float]
 
 
@@ -15,6 +16,7 @@ def fwhm_to_sigma(fwhm: float):
     """
     Convert FWHM to standard deviation
     """
+
     return fwhm / (2 * math.sqrt(2 * math.log(2)))
 
 
@@ -65,10 +67,12 @@ def blackman_harris_window(N: int):
 
 def complex_abs_sq(data: torch.Tensor):
     # Old style FFTs before complex:
-    # """Compute squared magnitude, assuming the last dimension is
+    # """
+    # Compute squared magnitude, assuming the last dimension is
     # [re, im], and therefore of size 2
     # """
-    # assert data.size(-1) == 2, "Last dimension size must be 2, representing [re, im]"
+    # assert data.size(-1) == 2,
+    # "Last dimension size must be 2, representing [re, im]"
     # return torch.sqrt(torch.sum(data**2, data.ndim-1))
 
     assert data.dtype == torch.complex64
@@ -125,7 +129,7 @@ def xyz_projections(data: torch.Tensor) -> torch.Tensor:
     Project the cube on to the 3 1D axes. 0th index goes as x, y, z
     """
 
-    assert data.size(0) == data.size(1) and data.size(0) == data.size(2),
+    assert (data.size(0) == data.size(1)) and (data.size(0) == data.size(2)),
     "Data is not a cube"
 
     x_projection = data.sum(1).sum(0)
@@ -141,7 +145,7 @@ def windowed_projected_PSD(data: torch.Tensor, window: torch.Tensor) -> torch.Te
     0th index goes as x, y, z
     """
 
-    assert data.size(0) == data.size(1) and data.size(0) == data.size(2),
+    assert (data.size(0) == data.size(1)) and (data.size(0) == data.size(2)),
     "Data is not a cube"
     assert len(window.size()) == 1,
     "Window must be 1D"
@@ -272,7 +276,8 @@ for _ in range(1000):
             zz = filtered_psd[2, :].expand(0, filtered_psd.size(1))
             zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
 
-            fourier_loss = torch.sum(torch.pow(torch.abs(torch.log(xy) - torch.log(zz)), 2), dim=1) * 400000
+            fourier_loss = torch.sum(torch.pow(torch.abs(torch.log(xy) -
+                                               torch.log(zz)), 2), dim=1) * 4e5
 
             print(rendering_loss.item(), fourier_loss.cpu().detach().numpy())
 
@@ -281,11 +286,9 @@ for _ in range(1000):
             return loss
         optimizer.step(closure)
 
+    # loss = fourier_loss + rendering_loss
 
-
-    #loss = fourier_loss + rendering_loss
-
-    reco = reconstruction**2
+    reco = reconstruction ** 2
     loss = closure()
     recodata = reco.clone().detach()
 
@@ -301,10 +304,10 @@ for _ in range(1000):
     plt.plot(proj_recon[2, :], label='Recon z')
     plt.title("XYZ projections")
 
-
     plt.subplot(2, 4, 2)
     psd_data = windowed_projected_PSD(data_normal, sampling_window).to("cpu")
-    psd_recon = windowed_projected_PSD(recodata.clone().detach(), sampling_window).to("cpu")
+    psd_recon = windowed_projected_PSD(recodata.clone().detach(),
+                                       sampling_window).to("cpu")
     plt.semilogy(psd_data[0, :], label='Data x')
     plt.semilogy(psd_data[1, :], label='Data y')
     plt.semilogy(psd_data[2, :], label='Data z')
@@ -323,7 +326,6 @@ for _ in range(1000):
     plt.legend()
     plt.axis(False)
 
-
     plt.subplot(2, 4, 5)
     plt.imshow(data_normal_cpu[100, :, :])
     plt.subplot(2, 4, 6)
@@ -335,18 +337,19 @@ for _ in range(1000):
     plt.subplot(2, 4, 8)
     plt.imshow(recodata[100, :, :].to("cpu") - data_hires[100, :, :])
 
-
     plt.show(block=False)
     print(loss)
 
-
     for z in range(1, data_normal.size(0)):
+
         hires_orig = data_hires[z, :, :]
         lores_orig = data_normal_cpu[z, :, :]
         hires_new = recodata[z, :, :].cpu()
-        res = torch.cat((hires_orig, lores_orig, hires_new, (hires_orig-hires_new)), 1)
+        res = torch.cat((hires_orig,
+                         lores_orig,
+                         hires_new,
+                         (hires_orig - hires_new)), 1)
         imsave(Path("out")/"catted-{0:03d}.tiff".format(z), res.numpy())
-
 
     plt.waitforbuttonpress()
 

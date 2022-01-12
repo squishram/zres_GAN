@@ -37,7 +37,7 @@ This translates to a (ROUGHLY) optimal voxels/chunk of 19
 def rotation_matrix(axis, angle):
     """
     Returns the rotation matrix associated with counterclockwise rotation about
-    the given axis by 'angle' radians. 
+    the given axis by 'angle' radians.
     // axis = the axis of rotation, described as a 3D vector
     // angle = the rotation in radians
     """
@@ -55,9 +55,17 @@ def rotation_matrix(axis, angle):
     s = np.sin(angle)
 
     # and here it is!
-    rotmat = np.array([[x ** 2 + (y ** 2 + z ** 2) * c, x * y * (1 - c) - z * s, x * z * (1 - c) + y * s],
-                       [x * y * (1 - c) + z * s, y ** 2 + (x ** 2 + z ** 2) * c, y * z * (1 - c) - x * s],
-                       [x * z * (1 - c) - y * s, y * z * (1 - c) + x * s, z ** 2 + (x ** 2 + y ** 2) * c]])
+    rotmat = np.array([[x ** 2 + (y ** 2 + z ** 2) * c,
+                        x * y * (1 - c) - z * s,
+                        x * z * (1 - c) + y * s],
+
+                       [x * y * (1 - c) + z * s,
+                        y ** 2 + (x ** 2 + z ** 2) * c,
+                        y * z * (1 - c) - x * s],
+
+                       [x * z * (1 - c) - y * s,
+                        y * z * (1 - c) + x * s,
+                        z ** 2 + (x ** 2 + y ** 2) * c]])
 
     return rotmat
 
@@ -66,11 +74,13 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
     """
     Sets up a random walk in three dimensions:
     // t = number of steps taken on each walk, dtype = uint
-    // size_img = dimensions of space in which walk takes place, presented as [xsize, ysize, zsize]. 
+    // size_img = dimensions of space in which walk takes place,
+    [xsize, ysize, zsize].
     Faster if fed in as a numpy array.
     // max_step = the size of each step in the walk, dtype = uint
     // sharpest = the sharpest turn between each step, dtype = float
-    // reinitialise = whether or not the walk is reinitialised at a random location when it leaves the space (saves memory), dtype = bool
+    // reinitialise = whether or not the walk is reinitialised
+    at a random location when it leaves the space (saves memory), dtype = bool
     """
 
     # x, y, z will contain a list of all of the positions
@@ -150,13 +160,17 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
 def image_of_gaussians(data, size_img, overlap, size_patch=5):
     """
     Breaks up coordinate data into 3D chunks to decrease runtime,
-    Retrieves gaussian contributions to each pixel using coordinate, intensity, and sigma data
-    outputs n_chunks arrays each with the data that could contribute to chunk n_chunks. 
-    // data is the coordinates of the points that will be made into an image AND their intensity, sigma_xy and sigma_z.
+    Retrieves gaussian contributions to each pixel
+    using coordinate, intensity, and sigma data
+    outputs n_chunks arrays
+    each with the data that could contribute to chunk n_chunks.
+    // data is the coordinates of the points that will be made into an image
+    AND their intensity, sigma_xy and sigma_z.
     It is an array with dimensions (6, n_points)
-    // size_img is the dimensions of the final image, tuple (size_x, size_y, size_z)
-    // n_chunks should be a 3 element vector containing x, y, z chunking values respectively
-    //
+    // size_img is the dimensions of the final image,
+    tuple (size_x, size_y, size_z)
+    // n_chunks should be a 3 element vector
+    containing x, y, z chunking values respectively
     """
 
     # this output will contain the final image with illuminated pixels
@@ -195,7 +209,7 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
                             data[2][j] < zstart - overlap[2] or data[2][j] >=
                             (zstart + size_patch[2] + overlap[2])):
                         continue
-                    # if the point is inside the chunk, append it to that chunk!
+                    # if the point is inside the chunk, append it to that chunk
                     chunked_data[x][y][z].append([data[i][j] for i in range(6)])
 
     # TODO this needs to be fixed to accomodate potentially varying sizes of chunk
@@ -205,14 +219,11 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
     xi = zi.transpose(0, 2)
     yi = zi.transpose(1, 2)
 
-    # Convert data array to list temporarily as these are faster to iterate through
+    # lists are faster to iterate through
     data = data.T
     data = data.tolist()
-    # This loop calculates the contributions from each local gaussian to each chunk
 
-    # csig_z = 1
-    # csig_xy = 1
-    # cintensity = 1
+    # This loop sums the contributions from each local gaussian to each chunk
     for x in range(n_chunks[0]):
         xstart = (size_img[0] * x) // n_chunks[0]
         for y in range(n_chunks[1]):
@@ -220,16 +231,20 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
             for z in range(n_chunks[2]):
                 zstart = (size_img[2] * z) // n_chunks[2]
 
-                intensityspot = torch.zeros((size_patch[0], size_patch[1], size_patch[2]))
+                intensityspot = torch.zeros((size_patch[0],
+                                             size_patch[1],
+                                             size_patch[2]))
 
                 # NOTE do we want to include a patch calculation here?
                 for cx, cy, cz, cintensity, csig_xy, csig_z in chunked_data[x][y][z]:
                     # define the normalisation constant for the gaussian
                     const_norm = cintensity / ((csig_xy ** 3) * (2 * np.pi) ** 1.5)
                     # add the gaussian contribution to the spot
-                    intensityspot += const_norm * torch.exp(-(((xi + xstart - cx) ** 2) / (2 * csig_xy ** 2)
-                                                              + ((yi + ystart - cy) ** 2) / (2 * csig_xy ** 2)
-                                                              + ((zi + zstart - cz) ** 2) / (2 * csig_z ** 2)))
+                    intensityspot += const_norm * torch.exp(
+                              -(((xi + xstart - cx) ** 2) / (2 * csig_xy ** 2)
+                              + ((yi + ystart - cy) ** 2) / (2 * csig_xy ** 2)
+                              + ((zi + zstart - cz) ** 2) / (2 * csig_z ** 2))
+                    )
                 xend = xstart + size_patch[0]
                 yend = ystart + size_patch[1]
                 zend = zstart + size_patch[2]
@@ -272,11 +287,12 @@ int_unc = 0.2
 sigma_xy_mean = 1
 sig_unc = 0.2
 # What is the mean sigma in z (in voxels)
-sigma_z_mean = 3 * sigma_xy_mean
+# set integer=1 for isometric resolution
+sigma_z_mean = 1 * sigma_xy_mean
 
 # how many chunks are we splitting the data into along each dimension?
-# (found to be 5 for 96x96x96 voxels)
-n_chunks = np.array([3, 3, 3])
+# (optimal found to be 5 for 96x96x96 voxels)
+n_chunks = np.array([5, 5, 5])
 # how much do the chunks overlap?
 overlap = 7 * sigma_xy_mean
 
@@ -324,9 +340,9 @@ time2 = time()
 print("The image size, in voxels, is " + str(size_img))
 print("The overlap, in voxels, is " + str(overlap))
 print("The number of total steps is " + str(t))
-print("the mean xy-sigma is " + str(sigma_xy_mean) +
-      "and the mean z-sigma is " + str(sigma_z_mean))
+print("the mean xy-sigma is " + str(sigma_xy_mean))
+print("the mean z-sigma is " + str(sigma_z_mean))
 print("Done! To make " +
       str(nimg) + " " + str(img_bit) + "-bit images with " +
-      str(n_chunks[0]) + " chunks/axis only took " +
-      str(time2 - time1) + " seconds - wow!")
+      str(n_chunks[0]) + " chunks/axis took " +
+      str(time2 - time1) + " seconds")

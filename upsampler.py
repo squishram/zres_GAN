@@ -5,7 +5,6 @@ Networks imported as classes from upsampler_funcs
 
 import os
 from pathlib import Path
-import numpy as np
 import matplotlib.pylab as plt
 import torch
 import torch.nn as nn
@@ -41,7 +40,7 @@ size_batch = 128
 size_img = 64
 # number of colour channels (1=grayscale, 3=RGB)
 n_colour_channels = 3
-# number of epochs i.e. number of times you re-use the same training images in total
+# number of epochs i.e. number of times you re-use the same training images
 n_epochs = 5
 # the channel depth of the hidden layers of the generator will be in integers of this number
 features_generator = 16
@@ -124,7 +123,8 @@ first_images = first_images.to(device)
 
 # step += 1 for every forward pass
 step = 0
-# this list contains the losses, [step, loss_dis_real, loss_dis_fake, loss_dis, loss_gen]
+# this list contains the losses
+# [step, loss_dis_real, loss_dis_fake, loss_dis, loss_gen]
 loss_list = [[] for i in range(7)]
 for epoch in range(n_epochs):
     # Target labels not needed! <3 unsupervised

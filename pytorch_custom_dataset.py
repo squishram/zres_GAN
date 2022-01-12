@@ -24,4 +24,3 @@ class Custom_Dataset(Dataset):
             image = self.transform(image)
 
         return (image, ylabel)
-

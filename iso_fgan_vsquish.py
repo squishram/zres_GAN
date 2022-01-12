@@ -25,14 +25,18 @@ def load_cube(zres: Number, prefix: str = "") -> torch.Tensor:
     Function for loading some data, assumes res is in the filename
     """
 
+    # data will contain a list of all the images
     data = []
     print('{}zres-{}-slice-*.fits'.format(prefix, int(zres)))
-    for i in sorted(Path('tmp/').
-                    glob('{}zres-{}-slice-*.fits'.
-                    format(prefix, int(zres)))):
+    # Path('X').glob('Y')
+    # = list of all of the image files in dir X with filename structure Y
+    files = sorted(Path('tmp/').glob('{}zres-{}-slice-*.fits'.format(prefix, int(zres))))
+    for i in files:
+        # print the file name
         print(i)
-        # Not sure what adu unit it. Arbitrary Data Unit? Seems to
-        # correspond to the numbers in the file.
+        # add the iamge with filename i to the list of images
+        # CCDData.read(filename, pixel brightness unit) opens an image file
+        # adu = arbitrary data unit(?)
         data.append(np.asarray(CCDData.read(i, unit='adu')))
 
     # data index is [y, x], i.e. row, col, so add a z dimension and stack
@@ -262,7 +266,7 @@ for _ in range(1000):
         def closure():
             optimizer.zero_grad()
             # reco is the reconstruction
-            # (squared so guaranteed to be positive for realz)
+            # (squared so guaranteed to be positive)
             reco = reconstruction**2
 
             # create a blurred image from the reconstruction

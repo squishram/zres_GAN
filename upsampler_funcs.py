@@ -99,5 +99,3 @@ def check_success(loader, model, device):
             n_samples += predictions.size(0)
 
         print(f'Got {n_correct}/{n_samples} with accuracy {(n_correct/n_samples) * 100}')
-
-

@@ -1,0 +1,24 @@
+class Dataset(data.Dataset):
+    'characterizes a dataset for pytorch'
+    def __init__(self, dir_data, list_IDs):
+        self.dir_data = dir_data
+        self.list_IDs = list_IDs
+
+    def __len__(self):
+        'denotes the total number of samples'
+        return len(self.list_IDs)
+
+    def __getitem__(self, item):
+        'Generates one sample of data'
+        #select sample
+        path_mr = os.path.join(self.dir_data, 'mr', self.list_IDs[item])
+        path_ct = os.path.join(self.dir_data, 'ct', self.list_IDs[item])
+
+        X = Image.open(path_mr)
+        X = np.array(X)  #np.shape(X) = (256,256)
+        X = X[:,:,np.newaxis]  #np.shape(X) = (256,256,1)
+        X = ToTensor()(X)
+        y = Image.open(path_ct)
+        y = np.array(y)[:,:,np.newaxis]
+        y = ToTensor()(y)
+        return X, y

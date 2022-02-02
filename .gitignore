@@ -2,5 +2,8 @@
 /_pycache_
 /images/catface/real
 /images/sims
+/old-obsolete_code/
+/tutorials/
 /logs
+network_flowchat.png
 *.swp

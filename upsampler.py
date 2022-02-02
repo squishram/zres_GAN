@@ -19,7 +19,7 @@ from datetime import date
 # STORAGE #
 # get the date
 today = str(date.today())
-today = today.replace('-', '')
+today = today.replace("-", "")
 # path_data - the path to the root of the dataset folder
 path_data = os.path.join(os.getcwd(), "images/")
 # this is the full path for the sample images
@@ -60,16 +60,24 @@ train_portion = 0.9
 
 
 if n_colour_channels == 1:
-    transform = tt.Compose([tt.Grayscale(),
-                            tt.Resize(size_img),
-                            tt.CenterCrop(size_img),
-                            tt.ToTensor(),
-                            tt.Normalize((0.5,), (0.5,)), ])
+    transform = tt.Compose(
+        [
+            tt.Grayscale(),
+            tt.Resize(size_img),
+            tt.CenterCrop(size_img),
+            tt.ToTensor(),
+            tt.Normalize((0.5,), (0.5,)),
+        ]
+    )
 else:
-    transform = tt.Compose([tt.Resize(size_img),
-                            tt.CenterCrop(size_img),
-                            tt.ToTensor(),
-                            tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ])
+    transform = tt.Compose(
+        [
+            tt.Resize(size_img),
+            tt.CenterCrop(size_img),
+            tt.ToTensor(),
+            tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
+    )
 
 
 ############################
@@ -83,8 +91,12 @@ train_size = int(train_portion * len(dataset))
 test_size = len(dataset) - train_size
 trainset, testset = torch.utils.data.random_split(dataset, [train_size, test_size])
 # stick them into dataloaders for training and testing
-trainloader = torch.utils.data.DataLoader(trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
-testloader = torch.utils.data.DataLoader(testset, size_batch, shuffle=True, num_workers=2, pin_memory=True)
+trainloader = torch.utils.data.DataLoader(
+    trainset, size_batch, shuffle=True, num_workers=2, pin_memory=True
+)
+testloader = torch.utils.data.DataLoader(
+    testset, size_batch, shuffle=True, num_workers=2, pin_memory=True
+)
 
 
 #################################
@@ -118,7 +130,7 @@ dis.train()
 
 # pull out some test images to check then
 data_iter = iter(testloader)
-first_images, labels = data_iter.next()
+first_images, _ = data_iter.next()
 first_images = first_images.to(device)
 
 # step += 1 for every forward pass
@@ -216,7 +228,7 @@ for epoch in range(n_epochs):
         upsampled *= 0.5
         upsampled += 0.5
         # name your image grid according to which training iteration it came from
-        fake_fname = 'generated_images_epoch-{0:0=2d}.png'.format(epoch + 1)
+        fake_fname = "generated_images_epoch-{0:0=2d}.png".format(epoch + 1)
         # make a grid i.e. a sample of generated images to look at
         img_grid_fake = utils.make_grid(upsampled[:32], normalize=True)
         utils.save_image(upsampled, os.path.join(path_gens, fake_fname), nrow=8)
@@ -229,17 +241,21 @@ metadata = today + "_metadata.txt"
 metadata = os.path.join(path_gens, metadata)
 # make sure to remove any other metadata files in the subdirectory
 if os.path.exists(metadata):
-  os.remove(metadata)
+    os.remove(metadata)
 # metadata = open(metadata, "a")
 with open(metadata, "a") as file:
-        file.writelines([os.path.basename(__file__),
-                         "\nlearning_rate = " + str(learning_rate),
-                         "\nsize_batch = " + str(size_batch),
-                         "\nsize_img = " + str(size_img),
-                         "\nn_colour_channels = " + str(n_colour_channels),
-                         "\nn_epochs = " + str(n_epochs),
-                         "\nfeatures_generator = " + str(features_generator),
-                         "\nfeatures_discriminator = " + str(features_discriminator)])
+    file.writelines(
+        [
+            os.path.basename(__file__),
+            "\nlearning_rate = " + str(learning_rate),
+            "\nsize_batch = " + str(size_batch),
+            "\nsize_img = " + str(size_img),
+            "\nn_colour_channels = " + str(n_colour_channels),
+            "\nn_epochs = " + str(n_epochs),
+            "\nfeatures_generator = " + str(features_generator),
+            "\nfeatures_discriminator = " + str(features_discriminator),
+        ]
+    )
 # make sure to add more about the network structures!
 
 
@@ -247,17 +263,21 @@ with open(metadata, "a") as file:
 for i in range(len(loss_list) - 1):
     plt.plot(loss_list[0], loss_list[i])
 
-plt.xlabel('Backpropagation Count')
-plt.ylabel('Total Loss')
-plt.legend(['loss_dis_real',
-            'loss_dis_fake',
-            'loss_dis',
-            'loss_gen_bce',
-            'loss_gen_L1',
-            'loss_gen'],
-            loc='upper left')
+plt.xlabel("Backpropagation Count")
+plt.ylabel("Total Loss")
+plt.legend(
+    [
+        "loss_dis_real",
+        "loss_dis_fake",
+        "loss_dis",
+        "loss_gen_bce",
+        "loss_gen_L1",
+        "loss_gen",
+    ],
+    loc="upper left",
+)
 
 print("Saving loss graph...")
-plt.savefig(os.path.join(path_gens, 'losses'), format='pdf')
+plt.savefig(os.path.join(path_gens, "losses"), format="pdf")
 
 print("Done!")

@@ -1,9 +1,3 @@
-import random as r
-import numpy as np
-from time import time
-from tifffile import imsave
-import torch
-
 """
 This code generates 3D images of simulated microtubules. Workflow:
 1. Uses a 3D random walk with constant step sizes
@@ -30,6 +24,16 @@ NOTE: cursory testing found 5^3 chunks for 96^3 voxel image to be fastest
 (faster than 4 chunks and 6 chunks for the same data)
 This translates to a (ROUGHLY) optimal voxels/chunk of 19
 """
+
+from datetime import date
+import math
+from pathlib import Path
+import os
+import random as r
+import numpy as np
+from time import time
+from tifffile import imsave
+import torch
 
 
 def rotation_matrix(axis, angle):
@@ -74,6 +78,14 @@ def rotation_matrix(axis, angle):
     )
 
     return rotmat
+
+
+def fwhm_to_sigma(fwhm: float):
+    """
+    Convert FWHM to standard deviation
+    """
+
+    return fwhm / (2 * math.sqrt(2 * math.log(2)))
 
 
 def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
@@ -276,15 +288,40 @@ def image_of_gaussians(data, size_img, overlap, size_patch=5):
 # Initialize timer
 time1 = time()
 
-# file specs:
-# how many images do you want?
-nimg = 1000
+
+###########
+# STORAGE #
+###########
+
+# get the date
+today = str(date.today())
+today = today.replace("-", "")
+# path to data
+path_data = os.path.join(os.getcwd(), "images/sims/")
+# path to training samples (low-z-resolution, high-z-resolution)
+path_lores = os.path.join(path_data, Path("microtubules/lores"))
+path_hires = os.path.join(path_data, Path("microtubules/hires"))
+# make directories if they don't already exist so images have somewhere to go
+os.makedirs(path_lores, exist_ok=True)
+os.makedirs(path_hires, exist_ok=True)
+
+##############
+# file specs #
+##############
+
+# number of images to produce for each resolution:
+n_imgs = 200
 # file name root:
 filename = "mtubs_sim_"
-# bittage of final image - 8, 16, 32, or 64?
-img_bit = 32
+# bittage of final image - 8 | 16 | 32 | 64
+# 16-bit is as high as cameras usually go anyway
+img_bit = 16
 
-# image + random walk specs:
+
+#####################
+# microtubule specs #
+#####################
+
 # number of steps per walk:
 t = 5000
 # size of final image in pixels:
@@ -294,18 +331,33 @@ max_step = 0.5
 # how sharply can the path bend each step?
 sharpest = (np.pi * max_step) / 10
 
-# PSF specs:
+
+#############
+# PSF specs #
+#############
+
 # What is the mean intensity (in AU) and its uncertainty
 # (as a fraction of the mean value)?
-intensity_mean = 5
+intensity_mean = 1000
 int_unc = 0.2
-# What is the mean sigma in xy (in voxels) and the sigma uncertainty
+# pixel size in nm
+size_pix_nm = 10.0
+# x/y-resolution
+xres = 24.0
+# z-resolution
+zres = 60.0
+# What is the mean sigma (in voxels) and the sigma uncertainty
 # (as a fraction of the mean value)?
-sigma_xy_mean = 1
 sig_unc = 0.2
-# What is the mean sigma in z (in voxels)
-# set integer=1 for isometric resolution
-sigma_z_mean = 1 * sigma_xy_mean
+# convert to sigma
+sigma_xy_mean = fwhm_to_sigma(xres / size_pix_nm)
+sigma_z_mean = fwhm_to_sigma(zres / size_pix_nm)
+sigma_tuple = (sigma_xy_mean, sigma_z_mean)
+
+
+###############
+# chunk specs #
+###############
 
 # how many chunks are we splitting the data into along each dimension?
 # (optimal found to be 5 for 96x96x96 voxels)
@@ -313,54 +365,83 @@ n_chunks = np.array([5, 5, 5])
 # how much do the chunks overlap?
 overlap = 7 * sigma_xy_mean
 
-for i in range(nimg):
+
+#################
+# training loop #
+#################
+
+for i in range(n_imgs):
     data = random_walk(t, size_img, max_step, sharpest)
+    # make one isotropic, one isotropic
+    for idx, sigma_z_mean in enumerate(sigma_tuple):
+        # broadcast intensity & sigma values into distributed arrays
+        intensity = np.array(
+            [
+                intensity_mean * (1 + r.uniform(-int_unc, int_unc))
+                for i in range(len(data[0]))
+            ]
+        )
+        sigma_xy = np.array(
+            [
+                sigma_xy_mean * (1 + r.uniform(-sig_unc, sig_unc))
+                for i in range(len(data[0]))
+            ]
+        )
+        sigma_z = np.array(
+            [
+                sigma_z_mean * (1 + r.uniform(-sig_unc, sig_unc))
+                for i in range(len(data[0]))
+            ]
+        )
 
-    # broadcast intensity & sigma values into distributed arrays
-    intensity = np.array(
-        [
-            intensity_mean * (1 + r.uniform(-int_unc, int_unc))
-            for i in range(len(data[0]))
-        ]
-    )
-    sigma_xy = np.array(
-        [
-            sigma_xy_mean * (1 + r.uniform(-sig_unc, sig_unc))
-            for i in range(len(data[0]))
-        ]
-    )
-    sigma_z = np.array(
-        [sigma_z_mean * (1 + r.uniform(-sig_unc, sig_unc)) for i in range(len(data[0]))]
-    )
+        # put coordinates, intensity, sigma_xy, sigma_z data into one structure
+        data = np.concatenate(
+            ([data[0]], [data[1]], [data[2]], [intensity], [sigma_xy], [sigma_z]),
+            axis=0,
+        )
+        data = np.array(data)
 
-    # put coordinates, intensity, sigma_xy, sigma_z data into one structure
-    data = np.concatenate(
-        ([data[0]], [data[1]], [data[2]], [intensity], [sigma_xy], [sigma_z]), axis=0
-    )
-    data = np.array(data)
+        # This function breaks the data into "chunks" for efficiency,
+        # then uses it to 'fill up' the empty image array:
+        mtubs = image_of_gaussians(data, size_img, n_chunks, overlap)
 
-    # This function breaks the data into "chunks" for efficiency,
-    # then uses it to 'fill up' the empty image array:
-    mtubs = image_of_gaussians(data, size_img, n_chunks, overlap)
+        # normalise all the brightness values
+        # then scale them up so that the brightest value is 255:
+        # mtubs = mtubs - np.mean(mtubs) / np.std(mtubs)
+        # mtubs = (mtubs / np.amax(mtubs)) * 255
+        # print(np.amax(mtubs))
+        # problem with above method: results in different scaling
+        # for lowres and hires images
 
-    # normalise all the brightness values
-    # then scale them up so that the brightest value is 255:
-    mtubs = (mtubs / np.amax(mtubs)) * 255
+        # alternatively: scale according to the z-projection
+        # which should be the same for both
+        # z_projection = data.sum(2).sum(1)
+        # TODO - finish this idea!
 
-    # tiff writing in python gets the axes wrong
-    # rotate the image before writing so it doesn't!
-    mtubs = np.rot90(mtubs, 1, [0, 2])
-    mtubs = np.rot90(mtubs, 1, [1, 2])
+        # tiff writing in python gets the axes wrong
+        # rotate the image before writing so it doesn't!
+        mtubs = np.rot90(mtubs, 1, [0, 2])
+        mtubs = np.rot90(mtubs, 1, [1, 2])
 
-    # write to file
-    filename_ind = filename + str(i) + ".tif"
-    print("Writing to tiff: " + str(i + 1))
-    if img_bit == 8:
-        imsave(filename_ind, mtubs.astype(np.uint8))
-    elif img_bit == 16:
-        imsave(filename_ind, mtubs.astype(np.uint16))
-    elif img_bit == 32:
-        imsave(filename_ind, mtubs.astype(np.uint32))
+        # write to file
+        # isotropic version:
+        if idx == 0:
+            filename_ind = filename + str(i + 1) + "_hires.tif"
+            file_path = os.path.join(path_hires, filename_ind)
+        # anisotropic version
+        elif idx == 1:
+            filename_ind = filename + str(i + 1) + "_lores.tif"
+            file_path = os.path.join(path_lores, filename_ind)
+
+        # tracker
+        print("Writing to tiff: " + str(2 * i + 1 + idx))
+
+        if img_bit == 8:
+            imsave(file_path, mtubs.astype(np.uint8))
+        elif img_bit == 16:
+            imsave(file_path, mtubs.astype(np.uint16))
+        elif img_bit == 32:
+            imsave(file_path, mtubs.astype(np.uint32))
 
 time2 = time()
 
@@ -371,7 +452,7 @@ print("the mean xy-sigma is " + str(sigma_xy_mean))
 print("the mean z-sigma is " + str(sigma_z_mean))
 print(
     "Done! To make "
-    + str(nimg)
+    + str(n_imgs)
     + " "
     + str(img_bit)
     + "-bit images with "

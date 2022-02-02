@@ -1,87 +1,65 @@
+"""
+this code represents a trainig methodology for a transductive GAN
+the generator will take an image of low-z-resolution and make it isotropic
+
+it combines a pixel-to-pixel comparison of:
+    a low-z-resolution image and its isotropic equivalent
+    a z-projection and an x/y projection of the same image, having undergone:
+        a fourier tranform
+        lobe removal
+        a high-pass filter
+
+there is no discriminator in this version of the network
+it will use a pytorch dataloader
+"""
+
+import os
 from pathlib import Path
+from datetime import date
 import math
-from typing import List, Union
+import numpy as np
 import matplotlib.pyplot as plt
 import torch
-import numpy as np
-from tifffile import imsave
-from astropy.nddata import CCDData
+import torch.nn as nn
+import torch.optim as optim
+from iso_fgan_dataloader import (
+    FourierProjection,
+    FourierProjectionLoss,
+    Custom_Dataset,
+    initialise_weights,
+)
+from iso_fgan_networks import Generator
+from torch.utils.data import DataLoader
+
+# from tifffile import imsave
 
 
-# define the 'Number' type as being either an integer or a float
-Number = Union[int, float]
-
-
-def selffwhm_to_sigma(fwhm: float):
-    """
-    Convert FWHM to standard deviation
-    """
-
+def fwhm_to_sigma(fwhm: float):
+    """Convert FWHM to standard deviation"""
     return fwhm / (2 * math.sqrt(2 * math.log(2)))
 
 
-def load_cube(zres: Number, prefix: str = "") -> torch.Tensor:
+def blackman_harris_window(N: int):
     """
-    Function for loading some data, assumes res is in the filename
+    Create a Blackman-Harris cosine window, a specific case of a cosine window
+    https://en.wikipedia.org/wiki/Window_function#Blackman%E2%80%93Harris_window
+
+    General cosine window: a sum of increasing cosines with alternating signs
+    - N + 1 is the number of samples in the range [0 to 2pi]
+    so N represents a discrete approximation of [0, 2pi)
     """
 
-    data = []
-    print('{}zres-{}-slice-*.fits'.format(prefix, int(zres)))
-    for i in sorted(Path('tmp/').
-                    glob('{}zres-{}-slice-*.fits'.
-                    format(prefix, int(zres)))):
-        print(i)
-        # Not sure what adu unit it. Arbitrary Data Unit? Seems to
-        # correspond to the numbers in the file.
-        data.append(np.asarray(CCDData.read(i, unit='adu')))
-
-    # data index is [y, x], i.e. row, col, so add a z dimension and stack
-    # Expand and contatenate to make [z, y, x]
-    return torch.tensor(
-        np.concatenate([np.expand_dims(n, 0) for n in data], 0),
-        dtype=torch.float
-        )
-
-
-def cosine_window(N: int, coefficients: List[float]):
-    """
-    General cosine window: a sum of increasing cosines
-    with alternating signs. N+1 is the number of samples in the
-    range [0 to 2pi], so N represents a discrete approximation
-    of [0, 2pi)
-    """
+    # these are the coefficients that make it a blackman-harris window
+    coeffs = [0.35875, 0.48829, 0.14128, 0.01168]
 
     x = torch.tensor(range(0, N)) * 2 * math.pi / N
 
     result = torch.zeros(N)
 
-    for i, c in enumerate(coefficients):
-        result += c * torch.cos(x * i) * ((-1)**i)
+    for i, c in enumerate(coeffs):
+        result += c * torch.cos(x * i) * ((-1) ** i)
 
     return result
-
-
-def blackman_harris_window(N: int):
-    """
-    Create a Blackman-Harris cosine window,
-    https://en.wikipedia.org/wiki/Window_function#Blackman%E2%80%93Harris_window
-    """
-
-    return cosine_window(N, [0.35875, 0.48829, 0.14128, 0.01168])
-
-
-def complex_abs_sq(data: torch.Tensor):
-    # Old style FFTs before complex:
-    # """
-    # Compute squared magnitude, assuming the last dimension is
-    # [re, im], and therefore of size 2
-    # """
-    # assert data.size(-1) == 2,
-    # "Last dimension size must be 2, representing [re, im]"
-    # return torch.sqrt(torch.sum(data**2, data.ndim-1))
-
-    assert data.dtype == torch.complex64
-    return torch.abs(data)**2
 
 
 def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
@@ -90,122 +68,21 @@ def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
     """
 
     radius = math.ceil(sigma * sigmas)
-    xs = np.array(range(-radius, radius+1))
-    kernel = np.exp(-xs**2 / (2 * sigma**2))
+    xs = np.array(range(-radius, radius + 1))
+    kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
     return torch.tensor(kernel / sum(kernel), dtype=torch.float)
 
 
-def conv_1D_z_axis(data: torch.Tensor,
-                   kernel: torch.Tensor,
-                   pad: bool = False) -> torch.Tensor:
+def hipass_gauss_kernel_fourier(sigma: float, N: int) -> torch.Tensor:
     """
-    Assuming data is a cube [z,y,x],
-    then perform a 1D convolution along the z axis
+    Make an unshifted Gaussian highpass filter in Fourier space
+    All real (i.e. not imaginary)
     """
 
-    assert len(kernel.size()) == 1, "Kernel is not 1D"
-    assert len(data.size()) == 3, "Data is not a cuboid"
-    assert len(kernel) % 2 == 1, "Kernel must be odd-sized"
-
-    # Data is [z y x]. We need [batch, channels, z, y, x] = [1,1,z,y,z]
-    d = data.unsqueeze(0).unsqueeze(0)
-
-    # Kernel is [z]. We need [channels out, channels in, z, y, x] = [1,1,z,1,1]
-    kz = kernel.unsqueeze(0).unsqueeze(0).unsqueeze(3).unsqueeze(4)
-    radius = int(len(kernel-1)/2)
-
-    if pad == "zero":
-        padding = (radius, 0, 0)
-
-    elif pad == "edge":
-        padding = (0, 0, 0)
-        bottom = data[0, :, :].expand(radius, data.size(1), data.size(2))
-        top = data[-1, :, :].expand(radius, data.size(1), data.size(2))
-        d = torch.cat([bottom, data, top], dim=0).unsqueeze(0).unsqueeze(0)
-
-    else:
-        assert False, "bad pad " + pad
-
-    result = torch.nn.functional.conv3d(d, kz, bias=None, padding=padding)
-
-    return result.squeeze(0).squeeze(0)
-
-
-def xyz_projections(data: torch.Tensor) -> torch.Tensor:
-    """
-    Project the cube on to the 3 1D axes. 0th index goes as x, y, z
-    """
-
-    assert (data.size(0) == data.size(1)) and (data.size(0) == data.size(2)),
-    "Data is not a cube"
-
-    x_projection = data.sum(1).sum(0)
-    y_projection = data.sum(2).sum(0)
-    z_projection = data.sum(2).sum(1)
-
-    return torch.stack([x_projection, y_projection, z_projection], dim=0)
-
-
-def windowed_projected_PSD(data: torch.Tensor,
-                           window: torch.Tensor) -> torch.Tensor:
-    """
-    Return the windowed power spectral density (onesided) of input data cube
-    0th index goes as x, y, z
-    """
-
-    assert (data.size(0) == data.size(1)) and (data.size(0) == data.size(2)),
-    "Data is not a cube"
-    assert len(window.size()) == 1,
-    "Window must be 1D"
-    assert window.size(0) == data.size(0),
-    "Window must match data size"
-
-    windowed_projections = xyz_projections(data) * \
-        window.expand((3, window.size(0)))
-
-    return complex_abs_sq(torch.fft.rfft(windowed_projections, dim=1))
-
-
-def fourier_anisotropy_loss_pnorm(data: torch.Tensor,
-                                  window: torch.Tensor,
-                                  filter_ft: torch.Tensor,
-                                  p: float = 2) -> torch.Tensor:
-    """
-    Compute the XZ and YZ fourier losses
-    (error between PSD on X compared to Z axis)
-    with the provided windowing function and fourier domain filter
-    """
-
-    assert data.size(0) == data.size(1) and data.size(0) == data.size(2),
-    "Data is not a cube"
-    assert len(window.size()) == 1,
-    "Window must be 1D"
-    assert window.size(0) == data.size(0),
-    "Window must match data size"
-    assert len(filter_ft.size()) == 1,
-    "Filter must be real 1D"
-    assert len(filter_ft) == math.floor(data.size(0)/2)+1,
-    "Filter must match size of 1 sided real FT of the data"
-
-    filtered_psd = windowed_projected_PSD(data, window) * \
-        filter_ft.expand((3, filter_ft.size(0)))
-
-    xy = filtered_psd[0:2, :]
-    zz = filtered_psd[2, :].expand(0, filtered_psd.size(1))
-    zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
-
-    return torch.sum(torch.pow(torch.abs(xy - zz), p), dim=1)
-
-
-def highpass_gaussian_kernel_fourier(sigma: float, N: int) -> torch.Tensor:
-    """
-    Make an unshifted Gaussian highpass filter in Fourier space. All real
-    """
-
-    centre = math.floor(N/2)
+    centre = math.floor(N / 2)
     xs = torch.tensor(range(0, N), dtype=torch.float) - centre
 
-    space_domain = torch.exp(-xs ** 2 / (2 * sigma ** 2))
+    space_domain = torch.exp(-(xs ** 2) / (2 * sigma ** 2))
     space_domain /= sum(space_domain)
 
     fourier = torch.fft.rfft(space_domain, dim=0)
@@ -213,197 +90,273 @@ def highpass_gaussian_kernel_fourier(sigma: float, N: int) -> torch.Tensor:
     return 1 - torch.abs(fourier)
 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+###########
+# STORAGE #
+###########
 
-nm_per_pix = 100.0
-z_res_full = 240.0
-z_res_real = 600.0
-
-data_normal_cpu = load_cube(z_res_real, prefix="noisy-")
-data_normal = data_normal_cpu.to(device)
-data_hires = load_cube(z_res_full)
-
-sigma_extra = math.sqrt(fwhm_to_sigma(z_res_real/nm_per_pix)**2 -
-                        fwhm_to_sigma(z_res_full/nm_per_pix)**2)
-print("extra sigma = {}".format(sigma_extra))
-
-# dl = conv_1D_z_axis(data_hires, gaussian_kernel(sigma_extra, 6.0))
-# for z in range(1, data_normal.size(0)):
-#    hires_orig = data_hires[z, :, :]
-#    lores_orig = data_normal[z, :, :]
-#    lores_new = dl[z, :, :]
-#    res = torch.cat((hires_orig, lores_orig, lores_new, (lores_orig-lores_new) * 1e7), 1)
-#    imsave(Path("splat")/"catted-{0:03d}.tiff".format(z), res.numpy())
+# get the date
+today = str(date.today())
+# remove dashes
+today = today.replace("-", "")
+# path to data
+path_data = os.path.join(os.getcwd(), "images/sims/")
+# path to training samples (low-z-resolution, high-z-resolution)
+path_lores = os.path.join(path_data, Path("microtubules/lores"))
+path_hires = os.path.join(path_data, Path("microtubules/hires"))
+# path to gneerated images - will make directory if there isn't one already
+path_gens = os.path.join(path_data, Path("microtubules/generated"), today)
+os.makedirs(path_gens, exist_ok=True)
 
 
-hpf_ft = highpass_gaussian_kernel_fourier(fwhm_to_sigma(z_res_real/nm_per_pix),
-                                          N=data_normal.size(2)).to(device)
-sampling_window = blackman_harris_window(128).to(device)
-z_kernel = gaussian_kernel(sigma_extra, 3.0).to(device)
+#####################
+# (HYPER)PARAMETERS #
+#####################
 
-# starting point for the reconstruction
-# is the square root of the reconstruction (data) that we want
+# use gpu if available, otherwise cpu
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# learning rate
+learning_rate = 3e-4
+# relative scaling of the loss components (use 0 and 1 to see how well they do alone)
+freq_domain_loss_scaler = 400000
+space_domain_loss_scaler = 1
+# batch size, i.e. #forward passes per backward propagation
+size_batch = 20
+# side length of (cubic) images
+size_img = 96
+# number of epochs i.e. number of times you re-use the same training images
+n_epochs = 5
+# channel depth of generator hidden layers in integers of this number
+features_gen = 16
+# channel depth of discriminator hidden layers in integers of this number
+# features_discriminator = 16
+# the side length of the convolutional kernel in the network
+kernel_size = 3
+# padding when doing convolutions to ensure no change in image size
+padding = int(kernel_size / 2)
+# pixel size in nm
+size_pix_nm = 100.0
+# z-resolution in the isotropic case
+zres_hi = 240.0
+# z-resolution in the anisotropic case
+zres_lo = 600.0
+
+############################
+# DATASETS AND DATALOADERS #
+############################
+
+# image datasets
+lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.tif")
+hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
+
+# image dataloaders
+lores_dataloader = DataLoader(lores_dataset, batch_size=5, shuffle=False, num_workers=2)
+hires_dataloader = DataLoader(hires_dataset, batch_size=5, shuffle=False, num_workers=2)
+
+# iterator objects from dataloaders
+lores_iterator = iter(lores_dataloader)
+hires_iterator = iter(hires_dataloader)
+
+# pull out a single batch
+lores_batch = lores_iterator.next()
+hires_batch = hires_iterator.next()
+
+# print the batch shape
+print("low-z-res minibatch has dimensions: {}".format(lores_batch.shape))
+print("high-z-res minibatch has dimensions: {}".format(hires_batch.shape))
+
+
+###########################
+# NETWORKS AND OPTIMISERS #
+###########################
+
+gen = Generator(features_gen, kernel_size, padding).to(device)
+initialise_weights(gen)
+gen.train()
+
+# the optimiser uses Adam to calculate the steps
+opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# MSELoss == (target - output)
+criterion_mse = nn.MSELoss()
+# FourierProjectionLoss ==
+# log(filtered x,y-projection(fourier(image))) - log(filtered z-projection(fourier(image)))
+criterion_ftp = FourierProjectionLoss()
+
+##################
+# IMPLEMENTATION #
+##################
+
+# sigma for real (lores) and isometric (hires) data
+sig_lores = fwhm_to_sigma(zres_lo / size_pix_nm)
+sig_hires = fwhm_to_sigma(zres_hi / size_pix_nm)
+# this is how much worse the resolution is in the anisotropic data
+sig_extra = math.sqrt(sig_lores ** 2 - sig_hires ** 2)
+
+# NOTE:
+# data_normal is the data made by load_cube(), a single low-z-res tiff stack
+# data_hires is the data made by load_cube(), a single high-z-res tiff stack
+# they are arrays of dims [z, y, x]
+hpf_ft = hipass_gauss_kernel_fourier(sig_lores, N=hires_batch.size(-1)).to(device)
+sampling_window = blackman_harris_window(size_img).to(device)
+z_kernel = gaussian_kernel(sig_extra, 3.0).to(device)
+
+# starting point for the reconstruction is the square root of the data we want
 reconstruction = torch.sqrt(data_normal.clone()).to(device)
 reconstruction.requires_grad = True
 
-
-optimizer = torch.optim.LBFGS([reconstruction], lr=1)
-
-
-# there are only two for loops
-# (because we are going to plot some things every 50 iterations)
-for _ in range(1000):
-
-    for i in range(50):
-        print("------------------------------",
-              i,
-              "------------------------------")
-
-        def closure():
-            optimizer.zero_grad()
-            # reco is the reconstruction
-            # (squared so guaranteed to be positive for realz)
-            reco = reconstruction**2
-
-            # create a blurred image from the reconstruction
-            # so you can now check if it matches the original data
-            rendering = conv_1D_z_axis(reco, z_kernel, pad="edge")
-
-            # rendering loss is the direct loss on the image
-            # as compared to the blurred reconstruction
-            rendering_loss = torch.sum((rendering - data_normal)**2)
-            fourier_loss = fourier_anisotropy_loss_pnorm(reco,
-                                                         sampling_window,
-                                                         hpf_ft)
-
-            # checking that the fourier domain of the reconstructed z
-            # is consistent with the fourier domain of the xy data
-            data_x_projection = data_normal.sum(1).sum(0)
-            data_y_projection = data_normal.sum(2).sum(0)
-            reco_z_projection = reco.sum(2).sum(1)
-            projections = torch.stack([data_x_projection,
-                                       data_y_projection,
-                                       reco_z_projection], dim=0)
-            windowed_projections = projections * \
-                sampling_window.expand((3, sampling_window.size(0)))
-            power_spectra = complex_abs_sq(torch.fft.rfft(windowed_projections,
-                                                          dim=1))
-            filtered_psd = power_spectra * hpf_ft.expand((3, hpf_ft.size(0)))
-
-            xy = filtered_psd[0:2, :]
-            zz = filtered_psd[2, :].expand(0, filtered_psd.size(1))
-            zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
-
-            fourier_loss = torch.sum(torch.pow(torch.abs(torch.log(xy) -
-                                               torch.log(zz)), 2), dim=1) * 4e5
-
-            print(rendering_loss.item(), fourier_loss.cpu().detach().numpy())
-
-            loss = rendering_loss + sum(fourier_loss)
-            loss.backward()
-            return loss
-        optimizer.step(closure)
-
-    # loss = fourier_loss + rendering_loss
-
-    reco = reconstruction ** 2
-    loss = closure()
-    recodata = reco.clone().detach()
-
-    plt.clf()
-    plt.subplot(2, 4, 1)
-    proj_data = xyz_projections(data_normal).to("cpu")
-    proj_recon = xyz_projections(recodata).to("cpu")
-    plt.plot(proj_data[0, :], label='Data x')
-    plt.plot(proj_data[1, :], label='Data y')
-    plt.plot(proj_data[2, :], label='Data z')
-    plt.plot(proj_recon[0, :], label='Recon x')
-    plt.plot(proj_recon[1, :], label='Recon y')
-    plt.plot(proj_recon[2, :], label='Recon z')
-    plt.title("XYZ projections")
-
-    plt.subplot(2, 4, 2)
-    psd_data = windowed_projected_PSD(data_normal, sampling_window).to("cpu")
-    psd_recon = windowed_projected_PSD(recodata.clone().detach(),
-                                       sampling_window).to("cpu")
-    plt.semilogy(psd_data[0, :], label='Data x')
-    plt.semilogy(psd_data[1, :], label='Data y')
-    plt.semilogy(psd_data[2, :], label='Data z')
-    plt.semilogy(psd_recon[0, :], label='Recon x')
-    plt.semilogy(psd_recon[1, :], label='Recon y')
-    plt.semilogy(psd_recon[2, :], label='Recon z')
-    plt.title("Fourier spectra")
-
-    plt.subplot(2, 4, 3)
-    plt.plot(0, label='Data x')
-    plt.plot(0, label='Data y')
-    plt.plot(0, label='Data z')
-    plt.plot(0, label='Recon x')
-    plt.plot(0, label='Recon y')
-    plt.plot(0, label='Recon z')
-    plt.legend()
-    plt.axis(False)
-
-    plt.subplot(2, 4, 5)
-    plt.imshow(data_normal_cpu[100, :, :])
-    plt.subplot(2, 4, 6)
-    plt.imshow(recodata[100, :, :].to("cpu"))
-
-    plt.subplot(2, 4, 7)
-    plt.imshow(data_hires[100, :, :])
-
-    plt.subplot(2, 4, 8)
-    plt.imshow(recodata[100, :, :].to("cpu") - data_hires[100, :, :])
-
-    plt.show(block=False)
-    print(loss)
-
-    for z in range(1, data_normal.size(0)):
-
-        hires_orig = data_hires[z, :, :]
-        lores_orig = data_normal_cpu[z, :, :]
-        hires_new = recodata[z, :, :].cpu()
-        res = torch.cat((hires_orig,
-                         lores_orig,
-                         hires_new,
-                         (hires_orig - hires_new)), 1)
-        imsave(Path("out")/"catted-{0:03d}.tiff".format(z), res.numpy())
-
-    plt.waitforbuttonpress()
+optimiser = torch.optim.LBFGS([reconstruction], lr=1)
 
 
-# plt.clf()
-# x_only = data_normal.sum(1).sum(0) * blackman_harris_window(128)
-# y_only = data_normal.sum(2).sum(0) * blackman_harris_window(128)
-# z_only = data_normal.sum(2).sum(1) * blackman_harris_window(128)
-# plt.subplot(1, 2, 1)
-# plt.plot(x_only, label='x')
-# plt.plot(y_only, label='y')
-# plt.plot(z_only, label='z')
-# plt.legend()
+# step += 1 for every forward pass
+step = 0
+# this list contains the losses
+# [step, loss_dis_real, loss_dis_fake, loss_dis, loss_gen]
+loss_list = [[] for i in range(7)]
+
+for epoch in range(n_epochs):
+
+    for batch_idx, (lores, _) in enumerate(lores_dataloader):
+
+        hires, _ = next(iter(hires_dataloader))
+
+        # send the batches of images to the gpu
+        lores = lores.to(device)
+        hires = hires.to(device)
+        # pass the low-z-res images through the generator to make improved z-res images
+        spres = gen(lores)
+
+        #####################
+        # SPACE DOMAIN LOSS #
+        #####################
+        """
+        the real component of the loss is =0 when:
+        img_hires == optimised(img_lores)
+        """
+
+        # space domain loss is simply (hires - spres)**2
+        space_domain_loss = criterion_mse(spres, hires)
+        space_domain_loss *= space_domain_loss_scaler
+
+        #########################
+        # FREQUENCY DOMAIN LOSS #
+        #########################
+        """
+        the frequency, or fourier component of the loss is =0 (note that this is oversimplified) when:
+        x_projection(fourier(img_original)) = y_projection(fourier(img_original)) = z_projection(fourier(img_optimised))
+        z_projection(fourier(img_optimised)) gets a little closer to this outcome with each step
+        """
+
+        # fourier domain x/y projections for original data
+        lores_xproj = lores.sum(1).sum(0)
+        lores_yproj = lores.sum(2).sum(0)
+        # fourier domain z projection for super-z-res image
+        spres_zproj = spres.sum(2).sum(1)
+        # put them into a single object
+        projections = torch.stack([lores_xproj, lores_yproj, spres_zproj], dim=0)
+
+        # apply a window
+        windowed_projections = projections * sampling_window.expand(
+            (3, sampling_window.size(0))
+        )
+
+        power_spectra = complex_abs_sq(torch.fft.rfft(windowed_projections, dim=1))
+
+        filtered_psd = power_spectra * hpf_ft.expand((3, hpf_ft.size(0)))
+
+        xy = filtered_psd[0:2, :]
+        zz = filtered_psd[2, :].expand(0, filtered_psd.size(1))
+        zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
+
+        freq_domain_loss = (
+            torch.sum(torch.pow(torch.abs(torch.log(xy) - torch.log(zz)), 2), dim=1)
+            * freq_domain_loss_scaler
+        )
+
+        # rendering_loss.item()
+        # = hires - lores; .item() converts from 0-dimensional tensor to a number
+        # fourier_loss.cpu.attach.numpy()
+        # = [real part of fourier loss, imaginary part of fourier loss]
+        print(space_domain_loss.item(), freq_domain_loss.cpu().detach().numpy())
+
+        # scale the loss appropriately
+        space_domain_loss *= space_domain_loss_scaler
+        freq_domain_loss *= freq_domain_loss_scaler
+        # total loss
+        loss = space_domain_loss + freq_domain_loss
+
+        # backpropagation to get the gradient
+        loss.backward()
+        # gradient descent step
+        optimiser.step()
+
+        if step % 100 == 0:
+            loss_list[0].append(int(step))
+            loss_list[4].append(float(freq_domain_loss))
+            loss_list[5].append(float(space_domain_loss))
+            loss_list[6].append(float(loss))
+
+        # count the number of backpropagations
+        step += 1
+
+    # using the 'with' method in conjunction with no_grad() simply
+    # disables grad calculations for the duration of the statement
+    # Thus, we can use it to generate a sample set of images without initiating
+    # a backpropagation calculation
+    # with torch.no_grad():
+    #     downsampled = pool(first_images)
+    #     spres = gen(downsampled)
+    #     # denormalise the images so they look nice n crisp
+    #     spres *= 0.5
+    #     spres += 0.5
+    #     # name your image grid according to which training iteration it came from
+    #     fake_fname = "generated_images_epoch-{0:0=2d}.png".format(epoch + 1)
+    #     # make a grid i.e. a sample of generated images to look at
+    #     img_grid_fake = utils.make_grid(spres[:32], normalize=True)
+    #     utils.save_image(spres, os.path.join(path_gens, fake_fname), nrow=8)
+    #     # Print losses
+    #     print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {fake_fname}")
 
 
-# What's a good fourier measure?
+# make a metadata file
+# metadata = today + "_metadata.txt"
+# metadata = os.path.join(path_gens, metadata)
+# # make sure to remove any other metadata files in the subdirectory
+# if os.path.exists(metadata):
+#     os.remove(metadata)
+# # metadata = open(metadata, "a")
+# with open(metadata, "a") as file:
+#     file.writelines(
+#         [
+#             os.path.basename(__file__),
+#             "\nlearning_rate = " + str(learning_rate),
+#             "\nsize_batch = " + str(size_batch),
+#             "\nsize_img = " + str(size_img),
+#             "\nn_epochs = " + str(n_epochs),
+#             "\nfeatures_generator = " + str(features_generator),
+#             "\nfeatures_discriminator = " + str(features_discriminator),
+#         ]
+#     )
+# make sure to add more about the network structures!
 
-# Only care about high frequency stuff
-# fta = complex_abs(torch.rfft(x_only,
-#                              signal_ndim=1,
-#                              normalized=False,
-#                              onesided=True))
-# plt.subplot(1, 2, 2)
-# plt.semilogy((abs(np.fft.fft(x_only))), label='x')
-# plt.semilogy(psd[0, :], label='xx')
-# plt.semilogy((abs(np.fft.fft(y_only))), label='y')
-# plt.semilogy(psd[1, :], label='yy')
-# plt.semilogy((abs(np.fft.fft(z_only))), label='z')
-# plt.semilogy(psd[2, :], label='zz')
-# plt.semilogy(filter_ft, label='kern')
-# plt.semilogy((fta), label='zz', LineWidth=1)
-# plt.legend()
-# plt.show(block=False)
 
+# plot out all the losses for examination!
+for i in range(len(loss_list) - 1):
+    plt.plot(loss_list[0], loss_list[i])
 
-# plt.clf();
-# x = blackman_harris_window(128)
-# plt.plot(x)
-# plt.show(block=False)
+plt.xlabel("Backpropagation Count")
+plt.ylabel("Total Loss")
+plt.legend(
+    [
+        "loss_dis_real",
+        "loss_dis_fake",
+        "loss_dis",
+        "loss_gen_bce",
+        "loss_gen_L1",
+        "loss_gen",
+    ],
+    loc="upper left",
+)
+
+print("Saving loss graph...")
+plt.savefig(os.path.join(path_gens, "losses"), format="pdf")
+
+print("Done!")

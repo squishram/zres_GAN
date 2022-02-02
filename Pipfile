@@ -16,6 +16,9 @@ tensorboard = "*"
 tqdm = "*"
 flake8 = "*"
 albumentations = "*"
+pycodestyle = "*"
+astropy = "*"
+pynvim = "*"
 
 [dev-packages]
 

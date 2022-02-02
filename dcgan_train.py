@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
 # import torchvision
 import torchvision.datasets as dset
 import torchvision.transforms as tt
@@ -50,29 +51,35 @@ n_workers = 2
 # this will allow us to create a dataloader with them
 # within which all images can be managed by the network architecture
 if z_axis_pixeldepth == 1:
-    transform = tt.Compose([tt.Grayscale(),
-                            tt.Resize(size_img),
-                            tt.CenterCrop(size_img),
-                            tt.ToTensor(),
-                            tt.Normalize((0.5,), (0.5,)), ])
+    transform = tt.Compose(
+        [
+            tt.Grayscale(),
+            tt.Resize(size_img),
+            tt.CenterCrop(size_img),
+            tt.ToTensor(),
+            tt.Normalize((0.5,), (0.5,)),
+        ]
+    )
 elif z_axis_pixeldepth == 3:
-    transform = tt.Compose([tt.Resize(size_img),
-                            tt.CenterCrop(size_img),
-                            tt.ToTensor(),
-                            tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ])
+    transform = tt.Compose(
+        [
+            tt.Resize(size_img),
+            tt.CenterCrop(size_img),
+            tt.ToTensor(),
+            tt.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
+    )
 else:
-    transform = tt.Compose([tt.Resize(size_img),
-                            tt.CenterCrop(size_img),
-                            tt.ToTensor()])
+    transform = tt.Compose(
+        [tt.Resize(size_img), tt.CenterCrop(size_img), tt.ToTensor()]
+    )
 
 # Create the dataset
 dataset = dset.ImageFolder(path_data, transform=transform)
 # Create the dataloader
-dataloader = torch.utils.data.DataLoader(dataset,
-                                         size_batch,
-                                         shuffle=True,
-                                         num_workers=n_workers,
-                                         pin_memory=True)
+dataloader = torch.utils.data.DataLoader(
+    dataset, size_batch, shuffle=True, num_workers=n_workers, pin_memory=True
+)
 
 # A class object describes a format for an 'instance'
 # e.g. we may have the class 'Tshirt(size)'
@@ -166,10 +173,14 @@ for epoch in range(n_epochs):
 
         # Print losses occasionally and print to tensorboard
         if batch_idx % 100 == 0:
-            print(f"Epoch [{epoch + 1}/{n_epochs}] Batch {batch_idx}/{len(dataloader)} \
-                  Loss D: {loss_disc:.4f}, loss G: {loss_gen:.4f}")
+            print(
+                f"Epoch [{epoch + 1}/{n_epochs}] Batch {batch_idx}/{len(dataloader)} \
+                  Loss D: {loss_disc:.4f}, loss G: {loss_gen:.4f}"
+            )
 
-        if (batch_idx % 500 == 0) or ((epoch == n_epochs - 1) and (batch_idx == len(dataloader) - 1)):
+        if (batch_idx % 500 == 0) or (
+            (epoch == n_epochs - 1) and (batch_idx == len(dataloader) - 1)
+        ):
             # using the 'with' method in conjunction with no_grad() simply
             # disables grad calculations for the duration of the statement
             # Thus, we can use it to generate a sample set of images without initiating a backpropagation step
@@ -179,13 +190,10 @@ for epoch in range(n_epochs):
                 fake *= 0.5
                 fake += 0.5
                 # name your image grid according to which training iteration it came from
-                fake_fname = 'generated_images-{0:0=4d}.png'.format(epoch + step + 1)
+                fake_fname = "generated_images-{0:0=4d}.png".format(epoch + step + 1)
                 # make a grid i.e. a sample of generated images to look at
                 img_grid_fake = utils.make_grid(fake[:32], normalize=True)
                 utils.save_image(fake, os.path.join(path_samples, fake_fname), nrow=8)
-                print('Saving', fake_fname)
+                print("Saving", fake_fname)
 
             step += 1
-
-
-

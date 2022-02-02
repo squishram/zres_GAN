@@ -11,7 +11,7 @@ class Generator(nn.Module):
     def __init__(self, n_colour_channels, features_generator, kernel_size, padding):
         super(Generator, self).__init__()
         self.net = nn.Sequential(
-            self.nn_block(n_colour_channels * 1,  features_generator * 1, kernel_size, 1, padding),
+            self.nn_block(n_colour_channels * 1, features_generator * 1, kernel_size, 1, padding),
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
             self.nn_block(features_generator * 1, features_generator * 2, kernel_size, 1, padding),
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
@@ -73,7 +73,7 @@ class Discriminator(nn.Module):
         return self.disc(x)
 
 
-#TODO THIS IS WHAT I NEED TO UNDERSTAND #
+# TODO THIS IS WHAT I NEED TO UNDERSTAND #
 def initialise_weights(model):
     for m in model.modules():
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):

@@ -18,6 +18,7 @@ it does not use a pytorch dataloader
 """
 
 from pathlib import Path
+
 # from astropy.nddata import CCDData
 # from torch.utils.data import DataLoader
 import os
@@ -356,15 +357,13 @@ sig_extra = math.sqrt(sig_lores ** 2 - sig_hires ** 2)
 
 # they are arrays of dims [z, y, x]
 hpf_ft = hipass_gauss_kernel_fourier(sig_lores, N=lores_gpu.size(-1)).to(device)
-print(hpf_ft.shape)
+print("highpass_gaussian_fiter dims:", hpf_ft.shape)
 sampling_window = blackman_harris_window(size_img).to(device)
 
 z_kernel = gaussian_kernel(sig_extra, 3.0).to(device)
 
 # starting point for the reconstruction is the square root of the data we want
-reconstruction = torch.sqrt(lores_gpu.clone()).to(
-    device
-)  # TODO lores_gpu - every element is the same negative number??
+reconstruction = torch.sqrt(lores_gpu.clone()).to(device)
 reconstruction.requires_grad = True
 
 optimiser = torch.optim.LBFGS([reconstruction], lr=1)
@@ -413,31 +412,33 @@ for _ in range(1000):
             projections = torch.stack(
                 [data_x_projection, data_y_projection, reco_z_projection], dim=0
             )
+            print("projections dims:", projections.shape)
 
             # apply a window
             windowed_projections = projections * sampling_window.expand(
                 (3, sampling_window.size(0))
             )
+            print("windowed projections dims:", windowed_projections.shape)
 
             power_spectra = complex_abs_sq(torch.fft.rfft(windowed_projections, dim=1))
             filtered_psd = power_spectra * hpf_ft.expand((3, hpf_ft.size(0)))
+            print("fourier windowed projections dims:", filtered_psd.shape)
             xy = filtered_psd[:2, :]
+            print("xy bit:", xy.shape)
             zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
-
-            fourier_loss = (
-                torch.sum(torch.pow(torch.abs(torch.log(xy) - torch.log(zz)), 2), dim=1)
-                * 4e5
-            )
+            print("zz bit:", zz.shape)
 
             # the loss is the difference between the log of the projections
             fourier_loss = torch.log(xy) - torch.log(zz)
+            print("fourier_loss before sum:", fourier_loss.shape)
             # take the absolute value to remove imaginary components, square, & sum to get the loss
-            fourier_loss = torch.sum(torch.pow(torch.abs(fourier_loss), 2), dim=1)
+            fourier_loss = 4e5 * torch.sum(torch.pow(torch.abs(fourier_loss), 2), dim=1)
+            print("fourier_loss after sum:", fourier_loss.shape)
 
             # rendering_loss.item()
             # == hires - lores; .item() method comverts from a torch to a number
             # fourier_loss.cpu.attach.numpy()
-            # == [real part of fourier loss, imaginary part of fourier loss]
+            # == [x part of fourier loss, y part of fourier loss]
             print(rendering_loss.item(), fourier_loss.cpu().detach().numpy())
 
             # total loss

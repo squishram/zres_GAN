@@ -267,8 +267,8 @@ plt.xlabel("Backpropagation Count")
 plt.ylabel("Total Loss")
 plt.legend(
     [
-        "loss_dis_real",
         "loss_dis_fake",
+        "loss_dis_real",
         "loss_dis",
         "loss_gen_bce",
         "loss_gen_L1",

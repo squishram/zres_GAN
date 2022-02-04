@@ -1,3 +1,14 @@
+"""
+STUFFFFF
+
+1. in susan's code (and in the transformation here, that emulates it)
+the projections are a single dimension large
+shouldn't a projection of a 3D image have two dimensions?
+
+2. torch.autograd.Variable is needed in the transform to keep track of the backpropagation
+but not sure how, where exactly it's meant to be used
+"""
+
 import os
 import math
 import numpy as np
@@ -15,38 +26,41 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class FourierProjection(object):
     """
-    Transform
+    Transform Class
 
-    input: a symmetrically-sized 3D image
+    fields: sigma, the standard deviation of the psf in z
+            the coefficients for the cosine window (default to blackman-harris window)
+    args: sample, the image being projected
+          dim, the dimension we wish to project down {0:x, 1:y, 2:z}
     output: a projection of the input (in x, y, or z), but in the frequency domain
-    args: the dimension you want (x, y, or z) defined as 0, 1, or 2 respectively
-          sigma, the standard deviation of the psf in z
+            which has been windowed and normalised
     """
 
-    def __init__(self, dim, sigma):
+    def __init__(self, sigma, coeffs=[0.35875, 0.48829, 0.14128, 0.01168]):
 
-        # 0, 1, 2 == x, y, z
-        self.dim = dim
         # standard deviation of PSF in z
         self.sigma = sigma
-        # these are the coefficients for a blackman-harris window
-        self.coeffs = [0.35875, 0.48829, 0.14128, 0.01168]
+        # the defaults are the coefficients for a blackman-harris window
+        self.coeffs = coeffs
 
-    def __call__(self, sample):
+    def __call__(self, image, dim):
 
-        # torch transform essential syntax
-        image, landmarks = sample['image'], sample['landmarks']
+        # this is the batch size
+        batch_size = torch.tensor(image.size(0)).item()
 
         # projections for original data
-        if self.dim == 0:
-            image = image.sum(1).sum(0)
-        elif self.dim == 1:
-            image = image.sum(2).sum(0)
-        elif self.dim == 2:
-            image = image.sum(2).sum(1)
+        if dim == 0:
+            image = image.sum(3).sum(2)
+        elif dim == 1:
+            image = image.sum(4).sum(2)
+        elif dim == 2:
+            image = image.sum(4).sum(3)
 
-        # define image dimensions
-        image_size = torch(max(image.shape))
+        # print("image shape after projection:", image.shape)
+
+        # this is the size of the projection
+        image_size = torch.tensor(image.size(2)).item()
+        # print("image size:", image_size)
 
         # these are the cosine arguments to make a cosine window
         cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
@@ -55,11 +69,15 @@ class FourierProjection(object):
         for i, c in enumerate(self.coeffs):
             sampling_window += ((-1) ** i) * c * torch.cos(cos_args * i)
 
-        # apply a window to each projection
-        image *= sampling_window.expand((1, image_size.shape(0)))
+        # sampling_window must be on the same device as the image
+        sampling_window = sampling_window.to(device)
+        # apply the window to each projection
+        image *= sampling_window.expand((1, image_size))
+        # print("image shape after sampling window:", image.shape)
 
-        # power spectrum for each projection
-        image = torch.abs(torch.fft.rfft(image, dim=1)) ** 2
+        # fourier transform
+        image = torch.abs(torch.fft.rfft(image, dim=2)) ** 2
+        # print("image shape after fourier transform:", image.shape)
 
         # create highpass gaussian kernel filter
         # centre of the image (halfway point)
@@ -72,45 +90,67 @@ class FourierProjection(object):
         filter /= sum(filter)
         # compute the fourier transform of the distribution
         filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
+        # must be on the gpu
+        filter = filter.to(device)
 
+        # print("filter shape:", filter.shape)
         # apply highpass gaussian kernel filter to transformed image
-        image *= filter
+        for i in range(batch_size):
+            image[i, 0, :] *= filter
+
+        # print("image shape after filter:", image.shape)
 
         # torch transform essential syntax
-        return {'image': image, 'landmarks': landmarks}
+        # return {'image': image, 'landmarks': landmarks}
+        return image
 
 
 class FourierProjectionLoss(nn.Module):
     """
     Loss Function Class
+    finds the loss of a z-projection with respect to an x-and-y-projection
 
-    input: highpass_filter(x,y,z-projections(fourier-transformed images))
     all projections must have the same dimensions, but need not come from the same image
     output: loss, as float
-    args: none for creating instance
+    fields: none
+    args: highpass_filter(x,y,z-projections(fourier-transformed images))
     """
 
-    def __init__(self, x_proj, y_proj, z_proj):
+    def __init__(self):
 
         # super() to inherit from parent class (standard for pytorch transforms)
         super().__init__()
-        # this is the x and y projections (in a single tensor)
-        self.xy_proj = torch.stack([x_proj, y_proj], dim=0)
-        # to calculate the loss compared to the z projection, we need to double it up
-        self.zz_proj = z_proj.expand((2, x_proj.size(1)))
 
-    def forward(self):
+    def forward(self, x_proj, y_proj, z_proj):
+
+        # on the gpu you go
+        # x_proj = x_proj.to(device)
+        # y_proj = y_proj.to(device)
+        # make sure the projection for the generated image can be used to backpropagate
+        # TODO not sure how Variable works/ where it should be, look more into it
+        # z_proj = Variable(z_proj, requires_grad=True).to(device)
+
+        # this is the x and y projections (in a single tensor)
+        xy_proj = torch.stack([x_proj, y_proj], dim=0)
+        # to calculate the loss compared to the z projection, we need to double it up
+        zz_proj = torch.stack([z_proj, z_proj], dim=0)
 
         # the loss is the difference between the log of the projections
-        freq_domain_loss = torch.log(self.xy_proj) - torch.log(self.zz_proj)
-        # take the absolute value to remove imaginary components
-        freq_domain_loss = torch.abs(freq_domain_loss)
-        # square the values
-        freq_domain_loss = torch.pow(freq_domain_loss, 2)
-        # add them together
-        freq_domain_loss = torch.sum(freq_domain_loss, dim=1)
+        freq_domain_loss = torch.log(xy_proj) - torch.log(zz_proj)
+        # take the absolute value to remove imaginary components, square them, and sum
+        freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=3).squeeze()
+
+        # this is the mean loss when compared with the x axis
+        freq_domain_loss_x = torch.mean(freq_domain_loss[0, :], dim=0)
+        # this is the mean loss when compared with the y axis
+        freq_domain_loss_y = torch.mean(freq_domain_loss[1, :], dim=0)
+
+        # both means as a single tensor
+        freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
+
         # make it autograd-sensitive so it is receptive to .backward()
-        freq_domain_loss = Variable(freq_domain_loss, requires_grad=True).to(device)
+        # TODO dunno if this needs to be here or above
+        # freq_domain_loss = Variable(freq_domain_loss, requires_grad=True).to(device)
 
         return freq_domain_loss
 
@@ -186,7 +226,7 @@ class Custom_Dataset(Dataset):
 
 def test():
     """
-    check that the class outputs datasets correctly
+    check that Custom_Dataset outputs datasets correctly
     the 'noisetest' dataset has dimensions (96, 64, 32)
     and can thus be used to check that the batches are the right shape
     """

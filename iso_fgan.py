@@ -17,7 +17,6 @@ import os
 from pathlib import Path
 from datetime import date
 import math
-import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -26,68 +25,18 @@ from iso_fgan_dataloader import (
     FourierProjection,
     FourierProjectionLoss,
     Custom_Dataset,
+)
+from iso_fgan_networks import (
+    Generator,
     initialise_weights,
 )
-from iso_fgan_networks import Generator
 from torch.utils.data import DataLoader
-
 # from tifffile import imsave
 
 
 def fwhm_to_sigma(fwhm: float):
     """Convert FWHM to standard deviation"""
     return fwhm / (2 * math.sqrt(2 * math.log(2)))
-
-
-def blackman_harris_window(N: int):
-    """
-    Create a Blackman-Harris cosine window, a specific case of a cosine window
-    https://en.wikipedia.org/wiki/Window_function#Blackman%E2%80%93Harris_window
-
-    General cosine window: a sum of increasing cosines with alternating signs
-    - N + 1 is the number of samples in the range [0 to 2pi]
-    so N represents a discrete approximation of [0, 2pi)
-    """
-
-    # these are the coefficients that make it a blackman-harris window
-    coeffs = [0.35875, 0.48829, 0.14128, 0.01168]
-
-    x = torch.tensor(range(0, N)) * 2 * math.pi / N
-
-    result = torch.zeros(N)
-
-    for i, c in enumerate(coeffs):
-        result += c * torch.cos(x * i) * ((-1) ** i)
-
-    return result
-
-
-def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
-    """
-    Make a normalized 1D Gaussian Kernel
-    """
-
-    radius = math.ceil(sigma * sigmas)
-    xs = np.array(range(-radius, radius + 1))
-    kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
-    return torch.tensor(kernel / sum(kernel), dtype=torch.float)
-
-
-def hipass_gauss_kernel_fourier(sigma: float, N: int) -> torch.Tensor:
-    """
-    Make an unshifted Gaussian highpass filter in Fourier space
-    All real (i.e. not imaginary)
-    """
-
-    centre = math.floor(N / 2)
-    xs = torch.tensor(range(0, N), dtype=torch.float) - centre
-
-    space_domain = torch.exp(-(xs ** 2) / (2 * sigma ** 2))
-    space_domain /= sum(space_domain)
-
-    fourier = torch.fft.rfft(space_domain, dim=0)
-
-    return 1 - torch.abs(fourier)
 
 
 ###########
@@ -117,7 +66,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 3e-4
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-freq_domain_loss_scaler = 400000
+freq_domain_loss_scaler = 1000
 space_domain_loss_scaler = 1
 # batch size, i.e. #forward passes per backward propagation
 size_batch = 20
@@ -165,25 +114,9 @@ print("low-z-res minibatch has dimensions: {}".format(lores_batch.shape))
 print("high-z-res minibatch has dimensions: {}".format(hires_batch.shape))
 
 
-###########################
-# NETWORKS AND OPTIMISERS #
-###########################
-
-gen = Generator(features_gen, kernel_size, padding).to(device)
-initialise_weights(gen)
-gen.train()
-
-# the optimiser uses Adam to calculate the steps
-opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-# MSELoss == (target - output)
-criterion_mse = nn.MSELoss()
-# FourierProjectionLoss ==
-# log(filtered x,y-projection(fourier(image))) - log(filtered z-projection(fourier(image)))
-criterion_ftp = FourierProjectionLoss()
-
-##################
-# IMPLEMENTATION #
-##################
+########################################
+# NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
+########################################
 
 # sigma for real (lores) and isometric (hires) data
 sig_lores = fwhm_to_sigma(zres_lo / size_pix_nm)
@@ -191,36 +124,46 @@ sig_hires = fwhm_to_sigma(zres_hi / size_pix_nm)
 # this is how much worse the resolution is in the anisotropic data
 sig_extra = math.sqrt(sig_lores ** 2 - sig_hires ** 2)
 
-# NOTE:
-# data_normal is the data made by load_cube(), a single low-z-res tiff stack
-# data_hires is the data made by load_cube(), a single high-z-res tiff stack
-# they are arrays of dims [z, y, x]
-hpf_ft = hipass_gauss_kernel_fourier(sig_lores, N=hires_batch.size(-1)).to(device)
-sampling_window = blackman_harris_window(size_img).to(device)
-z_kernel = gaussian_kernel(sig_extra, 3.0).to(device)
+# this function can create filtered fourier projections
+projector = FourierProjection(sig_lores)
 
-# starting point for the reconstruction is the square root of the data we want
-reconstruction = torch.sqrt(data_normal.clone()).to(device)
-reconstruction.requires_grad = True
+# this is the generator - make sure it's ready for training
+gen = Generator(features_gen, kernel_size, padding).to(device)
+initialise_weights(gen)
+gen.train()
 
-optimiser = torch.optim.LBFGS([reconstruction], lr=1)
+# Adam optimiser is supposed to be the shit for generators
+opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# MSELoss == (target - output) ** 2
+criterion_mse = nn.MSELoss()
+# FourierProjectionLoss ==
+# log(filtered x,y-projection(fourier(image))) - log(filtered z-projection(fourier(image)))
+criterion_ftp = FourierProjectionLoss()
 
+
+##################
+# IMPLEMENTATION #
+##################
 
 # step += 1 for every forward pass
 step = 0
 # this list contains the losses
-# [step, loss_dis_real, loss_dis_fake, loss_dis, loss_gen]
-loss_list = [[] for i in range(7)]
+loss_list = [[] for i in range(4)]
 
 for epoch in range(n_epochs):
 
-    for batch_idx, (lores, _) in enumerate(lores_dataloader):
+    for batch_idx, lores in enumerate(lores_dataloader):
 
-        hires, _ = next(iter(hires_dataloader))
+        if step % 50 == 0:
+            print("backpropagation count:", step)
+
+        # iterate through the hi-res versions of the image as well!
+        hires = next(iter(hires_dataloader))
 
         # send the batches of images to the gpu
-        lores = lores.to(device)
-        hires = hires.to(device)
+        lores = lores.to(device=device, dtype=torch.float)
+        hires = hires.to(device=device, dtype=torch.float)
+
         # pass the low-z-res images through the generator to make improved z-res images
         spres = gen(lores)
 
@@ -233,8 +176,8 @@ for epoch in range(n_epochs):
         """
 
         # space domain loss is simply (hires - spres)**2
+        # space_domain_loss = criterion_mse(spres, hires).to(device)
         space_domain_loss = criterion_mse(spres, hires)
-        space_domain_loss *= space_domain_loss_scaler
 
         #########################
         # FREQUENCY DOMAIN LOSS #
@@ -245,54 +188,47 @@ for epoch in range(n_epochs):
         z_projection(fourier(img_optimised)) gets a little closer to this outcome with each step
         """
 
-        # fourier domain x/y projections for original data
-        lores_xproj = lores.sum(1).sum(0)
-        lores_yproj = lores.sum(2).sum(0)
-        # fourier domain z projection for super-z-res image
-        spres_zproj = spres.sum(2).sum(1)
-        # put them into a single object
-        projections = torch.stack([lores_xproj, lores_yproj, spres_zproj], dim=0)
+        # fourier transform, projection, window, hipass filter
+        # ... for x dimension of original image
+        lores_xproj = projector(lores, 0)
+        # ... for y dimension of original image
+        lores_yproj = projector(lores, 1)
+        # ... for z dimension of generated image
+        spres_zproj = projector(spres, 2)
 
-        # apply a window
-        windowed_projections = projections * sampling_window.expand(
-            (3, sampling_window.size(0))
-        )
+        # loss calculation
+        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
 
-        power_spectra = complex_abs_sq(torch.fft.rfft(windowed_projections, dim=1))
+        ####################################
+        # LOSS AGGREGATION, BACKPRPAGATION #
+        ####################################
 
-        filtered_psd = power_spectra * hpf_ft.expand((3, hpf_ft.size(0)))
-
-        xy = filtered_psd[0:2, :]
-        zz = filtered_psd[2, :].expand(0, filtered_psd.size(1))
-        zz = filtered_psd[2, :].expand((2, filtered_psd.size(1)))
-
-        freq_domain_loss = (
-            torch.sum(torch.pow(torch.abs(torch.log(xy) - torch.log(zz)), 2), dim=1)
-            * freq_domain_loss_scaler
-        )
-
-        # rendering_loss.item()
+        # space_domain_loss.item()
         # = hires - lores; .item() converts from 0-dimensional tensor to a number
-        # fourier_loss.cpu.attach.numpy()
-        # = [real part of fourier loss, imaginary part of fourier loss]
+        # space_domain_loss.cpu.attach.numpy()
+        # = [x part of fourier loss, y part of fourier loss]
         print(space_domain_loss.item(), freq_domain_loss.cpu().detach().numpy())
 
+        # add the x and y components of the frequency domain loss
+        freq_domain_loss = sum(freq_domain_loss)
         # scale the loss appropriately
         space_domain_loss *= space_domain_loss_scaler
         freq_domain_loss *= freq_domain_loss_scaler
         # total loss
         loss = space_domain_loss + freq_domain_loss
 
+        # the zero grad thingy is come
+        gen.zero_grad()
         # backpropagation to get the gradient
         loss.backward()
         # gradient descent step
-        optimiser.step()
+        opt_gen.step()
 
         if step % 100 == 0:
             loss_list[0].append(int(step))
-            loss_list[4].append(float(freq_domain_loss))
-            loss_list[5].append(float(space_domain_loss))
-            loss_list[6].append(float(loss))
+            loss_list[1].append(float(freq_domain_loss))
+            loss_list[2].append(float(space_domain_loss))
+            loss_list[3].append(float(loss))
 
         # count the number of backpropagations
         step += 1
@@ -317,24 +253,23 @@ for epoch in range(n_epochs):
 
 
 # make a metadata file
-# metadata = today + "_metadata.txt"
-# metadata = os.path.join(path_gens, metadata)
-# # make sure to remove any other metadata files in the subdirectory
-# if os.path.exists(metadata):
-#     os.remove(metadata)
-# # metadata = open(metadata, "a")
-# with open(metadata, "a") as file:
-#     file.writelines(
-#         [
-#             os.path.basename(__file__),
-#             "\nlearning_rate = " + str(learning_rate),
-#             "\nsize_batch = " + str(size_batch),
-#             "\nsize_img = " + str(size_img),
-#             "\nn_epochs = " + str(n_epochs),
-#             "\nfeatures_generator = " + str(features_generator),
-#             "\nfeatures_discriminator = " + str(features_discriminator),
-#         ]
-#     )
+metadata = today + "_metadata.txt"
+metadata = os.path.join(path_gens, metadata)
+# make sure to remove any other metadata files in the subdirectory
+if os.path.exists(metadata):
+    os.remove(metadata)
+# metadata = open(metadata, "a")
+with open(metadata, "a") as file:
+    file.writelines(
+        [
+            os.path.basename(__file__),
+            "\nlearning_rate = " + str(learning_rate),
+            "\nsize_batch = " + str(size_batch),
+            "\nsize_img = " + str(size_img),
+            "\nn_epochs = " + str(n_epochs),
+            "\nfeatures_gen= " + str(features_gen),
+        ]
+    )
 # make sure to add more about the network structures!
 
 
@@ -346,12 +281,9 @@ plt.xlabel("Backpropagation Count")
 plt.ylabel("Total Loss")
 plt.legend(
     [
-        "loss_dis_real",
-        "loss_dis_fake",
-        "loss_dis",
-        "loss_gen_bce",
-        "loss_gen_L1",
-        "loss_gen",
+        "frequency domain loss",
+        "space domain loss",
+        "total loss",
     ],
     loc="upper left",
 )

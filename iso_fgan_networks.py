@@ -2,7 +2,6 @@
 Generator for increasing the resolution of a 3D image
 """
 
-import torch
 import torch.nn as nn
 
 
@@ -13,10 +12,11 @@ class Generator(nn.Module):
         self.net = nn.Sequential(
             self.nn_block(1, n_features * 1, kernel_size, 1, padding),
             self.nn_block(n_features * 1, n_features * 2, kernel_size, 1, padding),
-            self.nn_block(n_features * 2, n_features * 4, kernel_size, 1, padding),
-            self.nn_block(n_features * 4, n_features * 8, kernel_size, 1, padding),
+            # had to remove these blocks as the GPU was overloaded
+            # self.nn_block(n_features * 2, n_features * 4, kernel_size, 1, padding),
+            # self.nn_block(n_features * 4, n_features * 8, kernel_size, 1, padding),
             nn.Conv3d(
-                n_features * 8, 1, kernel_size=kernel_size, stride=1, padding=padding
+                n_features * 2, 1, kernel_size=kernel_size, stride=1, padding=padding
             ),
             # nn.Tanh(),
         )

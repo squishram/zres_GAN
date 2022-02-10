@@ -19,6 +19,7 @@ albumentations = "*"
 pycodestyle = "*"
 astropy = "*"
 pynvim = "*"
+torchio = "*"
 
 [dev-packages]
 

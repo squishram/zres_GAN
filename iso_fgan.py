@@ -11,6 +11,12 @@ it combines a pixel-to-pixel comparison of:
 
 there is no discriminator in this version of the network
 it will use a pytorch dataloader
+
+CURRENT ISSUES
+1. the projections are a single dimension large
+shouldn't a projection of a 3D image have two dimensions?
+2. the generator is stretching the image dims in Z by *batch_size
+
 """
 
 import os
@@ -21,22 +27,17 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from iso_fgan_dataloader import (
+from iso_fgan_functions import (
     FourierProjection,
     FourierProjectionLoss,
     Custom_Dataset,
-)
-from iso_fgan_networks import (
     Generator,
     initialise_weights,
 )
 from torch.utils.data import DataLoader
-# from tifffile import imsave
-
-
-def fwhm_to_sigma(fwhm: float):
-    """Convert FWHM to standard deviation"""
-    return fwhm / (2 * math.sqrt(2 * math.log(2)))
+# import torchio.transforms as transforms
+# import torchio as tio
+from tifffile import imwrite
 
 
 ###########
@@ -66,18 +67,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 3e-4
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-freq_domain_loss_scaler = 1000
+freq_domain_loss_scaler = 1
 space_domain_loss_scaler = 1
 # batch size, i.e. #forward passes per backward propagation
-size_batch = 20
+batch_size = 4
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 5
+n_epochs = 10
 # channel depth of generator hidden layers in integers of this number
 features_gen = 16
-# channel depth of discriminator hidden layers in integers of this number
-# features_discriminator = 16
 # the side length of the convolutional kernel in the network
 kernel_size = 3
 # padding when doing convolutions to ensure no change in image size
@@ -98,47 +97,40 @@ lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.
 hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
 
 # image dataloaders
-lores_dataloader = DataLoader(lores_dataset, batch_size=5, shuffle=False, num_workers=2)
-hires_dataloader = DataLoader(hires_dataset, batch_size=5, shuffle=False, num_workers=2)
-
-# iterator objects from dataloaders
-lores_iterator = iter(lores_dataloader)
-hires_iterator = iter(hires_dataloader)
+lores_dataloader = DataLoader(
+    lores_dataset, batch_size=batch_size, shuffle=False, num_workers=2
+)
+hires_dataloader = DataLoader(
+    hires_dataset, batch_size=batch_size, shuffle=False, num_workers=2
+)
 
 # pull out a single batch
-lores_batch = lores_iterator.next()
-hires_batch = hires_iterator.next()
-
-# print the batch shape
-print("low-z-res minibatch has dimensions: {}".format(lores_batch.shape))
-print("high-z-res minibatch has dimensions: {}".format(hires_batch.shape))
-
+lores_iterator = iter(lores_dataloader)
+lores_batch = lores_iterator.next().to(device)
 
 ########################################
 # NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
 ########################################
 
 # sigma for real (lores) and isometric (hires) data
-sig_lores = fwhm_to_sigma(zres_lo / size_pix_nm)
-sig_hires = fwhm_to_sigma(zres_hi / size_pix_nm)
-# this is how much worse the resolution is in the anisotropic data
-sig_extra = math.sqrt(sig_lores ** 2 - sig_hires ** 2)
+sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
+sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 
 # this function can create filtered fourier projections
 projector = FourierProjection(sig_lores)
 
-# this is the generator - make sure it's ready for training
+# Generator Setup
 gen = Generator(features_gen, kernel_size, padding).to(device)
 initialise_weights(gen)
 gen.train()
 
+# Loss and Optimisation
+# mean squared error loss
+criterion_mse = nn.MSELoss()
+# fourier-transformed projection loss
+criterion_ftp = FourierProjectionLoss()
 # Adam optimiser is supposed to be the shit for generators
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-# MSELoss == (target - output) ** 2
-criterion_mse = nn.MSELoss()
-# FourierProjectionLoss ==
-# log(filtered x,y-projection(fourier(image))) - log(filtered z-projection(fourier(image)))
-criterion_ftp = FourierProjectionLoss()
 
 
 ##################
@@ -153,9 +145,6 @@ loss_list = [[] for i in range(4)]
 for epoch in range(n_epochs):
 
     for batch_idx, lores in enumerate(lores_dataloader):
-
-        if step % 50 == 0:
-            print("backpropagation count:", step)
 
         # iterate through the hi-res versions of the image as well!
         hires = next(iter(hires_dataloader))
@@ -203,12 +192,6 @@ for epoch in range(n_epochs):
         # LOSS AGGREGATION, BACKPRPAGATION #
         ####################################
 
-        # space_domain_loss.item()
-        # = hires - lores; .item() converts from 0-dimensional tensor to a number
-        # space_domain_loss.cpu.attach.numpy()
-        # = [x part of fourier loss, y part of fourier loss]
-        print(space_domain_loss.item(), freq_domain_loss.cpu().detach().numpy())
-
         # add the x and y components of the frequency domain loss
         freq_domain_loss = sum(freq_domain_loss)
         # scale the loss appropriately
@@ -224,6 +207,7 @@ for epoch in range(n_epochs):
         # gradient descent step
         opt_gen.step()
 
+        # aggregate loss data
         if step % 100 == 0:
             loss_list[0].append(int(step))
             loss_list[1].append(float(freq_domain_loss))
@@ -237,19 +221,24 @@ for epoch in range(n_epochs):
     # disables grad calculations for the duration of the statement
     # Thus, we can use it to generate a sample set of images without initiating
     # a backpropagation calculation
-    # with torch.no_grad():
-    #     downsampled = pool(first_images)
-    #     spres = gen(downsampled)
-    #     # denormalise the images so they look nice n crisp
-    #     spres *= 0.5
-    #     spres += 0.5
-    #     # name your image grid according to which training iteration it came from
-    #     fake_fname = "generated_images_epoch-{0:0=2d}.png".format(epoch + 1)
-    #     # make a grid i.e. a sample of generated images to look at
-    #     img_grid_fake = utils.make_grid(spres[:32], normalize=True)
-    #     utils.save_image(spres, os.path.join(path_gens, fake_fname), nrow=8)
-    #     # Print losses
-    #     print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {fake_fname}")
+    with torch.no_grad():
+        # pass low-z-res image through the generator
+        genimg = gen(lores_batch)
+        genimg = genimg.cpu().numpy()
+        # name your image grid according to which training iteration it came from
+        genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
+        print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
+        # save the sample image
+        imwrite(os.path.join(path_gens, genimg_name), genimg)
+
+    # print the loss after each epoch
+    # space_domain_loss.item()
+    # = hires - lores; .item() converts from 0-dimensional tensor to a number
+    # space_domain_loss.cpu.attach.numpy()
+    # = [x part of fourier loss, y part of fourier loss]
+    print("backpropagation count:", step)
+    print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
+    print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
 
 
 # make a metadata file
@@ -264,19 +253,18 @@ with open(metadata, "a") as file:
         [
             os.path.basename(__file__),
             "\nlearning_rate = " + str(learning_rate),
-            "\nsize_batch = " + str(size_batch),
+            "\nsize_batch = " + str(batch_size),
             "\nsize_img = " + str(size_img),
             "\nn_epochs = " + str(n_epochs),
             "\nfeatures_gen= " + str(features_gen),
         ]
     )
-# make sure to add more about the network structures!
+# TODO make sure to add more about the network structures!
 
-
-# plot out all the losses for examination!
-for i in range(len(loss_list) - 1):
+# plot out all the losses:
+for i in range(1, len(loss_list)):
     plt.plot(loss_list[0], loss_list[i])
-
+# legend
 plt.xlabel("Backpropagation Count")
 plt.ylabel("Total Loss")
 plt.legend(

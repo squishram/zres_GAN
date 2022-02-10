@@ -1,23 +1,13 @@
-"""
-STUFFFFF
-
-1. in susan's code (and in the transformation here, that emulates it)
-the projections are a single dimension large
-shouldn't a projection of a 3D image have two dimensions?
-
-2. torch.autograd.Variable is needed in the transform to keep track of the backpropagation
-but not sure how, where exactly it's meant to be used
-"""
-
 import os
 import math
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torch.autograd import Variable
 from skimage import io
 from pathlib import Path
+import torchio as tio
+import torchio.transforms as transforms
 
 
 # make sure calculations in these classes can be done on the GPU
@@ -30,10 +20,10 @@ class FourierProjection(object):
 
     fields: sigma, the standard deviation of the psf in z
             the coefficients for the cosine window (default to blackman-harris window)
-    args: sample, the image being projected
+    args: image, the image being projected
           dim, the dimension we wish to project down {0:x, 1:y, 2:z}
     output: a projection of the input (in x, y, or z), but in the frequency domain
-            which has been windowed and normalised
+            which has been cosine-windowed and normalised
     """
 
     def __init__(self, sigma, coeffs=[0.35875, 0.48829, 0.14128, 0.01168]):
@@ -45,10 +35,12 @@ class FourierProjection(object):
 
     def __call__(self, image, dim):
 
-        # this is the batch size
+        # batch size - .item() to convert from tensor -> int
         batch_size = torch.tensor(image.size(0)).item()
 
         # projections for original data
+        # TODO - why are we projecting down two axes
+        # surely it should just be the one?
         if dim == 0:
             image = image.sum(3).sum(2)
         elif dim == 1:
@@ -56,36 +48,33 @@ class FourierProjection(object):
         elif dim == 2:
             image = image.sum(4).sum(3)
 
-        # print("image shape after projection:", image.shape)
-
-        # this is the size of the projection
+        # this is the side length of the projection
         image_size = torch.tensor(image.size(2)).item()
-        # print("image size:", image_size)
 
         # these are the cosine arguments to make a cosine window
+        # TODO in susan's code, the number 128 is used instead of image_size
+        # did I translate this correctly? or does 128 come from something else?
         cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
         # generate the sampling window
         sampling_window = torch.zeros(image_size)
-        for i, c in enumerate(self.coeffs):
-            sampling_window += ((-1) ** i) * c * torch.cos(cos_args * i)
+        for idx, coefficient in enumerate(self.coeffs):
+            sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
 
         # sampling_window must be on the same device as the image
         sampling_window = sampling_window.to(device)
         # apply the window to each projection
         image *= sampling_window.expand((1, image_size))
-        # print("image shape after sampling window:", image.shape)
 
         # fourier transform
         image = torch.abs(torch.fft.rfft(image, dim=2)) ** 2
-        # print("image shape after fourier transform:", image.shape)
 
-        # create highpass gaussian kernel filter
+        # Highpass Gaussian Kernel Filter
         # centre of the image (halfway point)
         filter = math.floor(image_size / 2)
-        # centre filter on 0
+        # centre filter on origin
         filter = torch.tensor(range(0, image_size), dtype=torch.float) - filter
         # convert to gaussian distribution
-        filter = torch.exp(-(filter ** 2) / (2 * self.sigma ** 2))
+        filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
         # normalise (to normal distribution)
         filter /= sum(filter)
         # compute the fourier transform of the distribution
@@ -93,15 +82,10 @@ class FourierProjection(object):
         # must be on the gpu
         filter = filter.to(device)
 
-        # print("filter shape:", filter.shape)
         # apply highpass gaussian kernel filter to transformed image
-        for i in range(batch_size):
-            image[i, 0, :] *= filter
+        for idx in range(batch_size):
+            image[idx, 0, :] *= filter
 
-        # print("image shape after filter:", image.shape)
-
-        # torch transform essential syntax
-        # return {'image': image, 'landmarks': landmarks}
         return image
 
 
@@ -124,11 +108,10 @@ class FourierProjectionLoss(nn.Module):
     def forward(self, x_proj, y_proj, z_proj):
 
         # on the gpu you go
-        # x_proj = x_proj.to(device)
-        # y_proj = y_proj.to(device)
-        # make sure the projection for the generated image can be used to backpropagate
-        # TODO not sure how Variable works/ where it should be, look more into it
-        # z_proj = Variable(z_proj, requires_grad=True).to(device)
+        x_proj = x_proj.to(device)
+        y_proj = y_proj.to(device)
+        # the z_proj comes from the generated image, so must be backpropagation-sensitive
+        z_proj = torch.tensor(z_proj, requires_grad=True).to(device)
 
         # this is the x and y projections (in a single tensor)
         xy_proj = torch.stack([x_proj, y_proj], dim=0)
@@ -138,7 +121,9 @@ class FourierProjectionLoss(nn.Module):
         # the loss is the difference between the log of the projections
         freq_domain_loss = torch.log(xy_proj) - torch.log(zz_proj)
         # take the absolute value to remove imaginary components, square them, and sum
-        freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=3).squeeze()
+        freq_domain_loss = torch.sum(
+            torch.pow(torch.abs(freq_domain_loss), 2), dim=3
+        ).squeeze()
 
         # this is the mean loss when compared with the x axis
         freq_domain_loss_x = torch.mean(freq_domain_loss[0, :], dim=0)
@@ -147,10 +132,6 @@ class FourierProjectionLoss(nn.Module):
 
         # both means as a single tensor
         freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
-
-        # make it autograd-sensitive so it is receptive to .backward()
-        # TODO dunno if this needs to be here or above
-        # freq_domain_loss = Variable(freq_domain_loss, requires_grad=True).to(device)
 
         return freq_domain_loss
 
@@ -207,21 +188,84 @@ class Custom_Dataset(Dataset):
 
         # select image
         img_path = os.path.join(self.dir_data, self.files[file])
-        # import image (scikit-image.io imports tiffs as (z, x, y))
+        # import image (scikit-image.io imports tiffs as np.array(z, x, y))
         img = io.imread(img_path)
-        # convert to numpy array for faster calculations
-        img = np.asarray(img)
-        # normalise pixel values
+        # now: img.shape = (z, x, y)
+        # choose datatype using numpy
+        img = np.asarray(img, dtype=np.float32)
+        # normalise to range (0, 1)
         img = img / np.max(img)
-
         # convert to tensor
         img = torch.tensor(img)
-        # now: img.shape = (z, x, y)
-        img = torch.swapaxes(img, 1, 2)
-        # now: img.shape = (z, y, x)
+        # add channels dimension
         img = img.unsqueeze(0)
+        # now: img.shape = (1, z, x, y)
+        img = torch.swapaxes(img, 2, 3)
         # now: img.shape = (1, z, y, x)
+
+        # apply transform from torchio library if defined
+        if self.transform:
+            img = self.transform(img)
+
         return img
+
+
+class Generator(nn.Module):
+    """
+    Convolutional Network Class
+    fields:
+    n_features, channel depth after convolution
+    kernel_size (int), side length of cubic kernel
+    padding (int), count of padding blocks
+    """
+
+    def __init__(self, n_features, kernel_size, padding=None):
+
+        super(Generator, self).__init__()
+
+        if not padding:
+            padding = int(kernel_size / 2)
+
+        self.net = nn.Sequential(
+            self.nn_block(1, n_features * 4, kernel_size, 1, padding),
+            self.nn_block(n_features * 4, n_features * 2, kernel_size, 1, padding),
+            self.nn_block(n_features * 2, n_features * 1, kernel_size, 1, padding),
+            # self.nn_block(n_features * 4, n_features * 8, kernel_size, 1, padding),
+            nn.Conv3d(
+                n_features * 1, 1, kernel_size=kernel_size, stride=1, padding=padding
+            ),
+            # image values need to be between 0 and 1
+            nn.Sigmoid(),
+        )
+
+    def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
+        # better to go faster up and slower down
+        return nn.Sequential(
+            nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride,
+                padding,
+                bias=False,
+            ),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(0.2),
+        )
+
+    def forward(self, batch):
+        return self.net(batch)
+
+
+def initialise_weights(model):
+    """
+    Weight Initiliaser
+    input: the generator instance
+    output: the generator instance, with initalised weights
+    """
+    for m in model.modules():
+        if isinstance(m, (nn.Conv3d, nn.BatchNorm3d)):
+            nn.init.normal_(m.weight.data, 0.0, 0.02)
 
 
 def test():
@@ -231,59 +275,68 @@ def test():
     and can thus be used to check that the batches are the right shape
     """
 
+    transform = tio.Compose(
+        [
+            transforms.RescaleIntensity((0, 1)),
+            # transforms.ZNormalization(),
+            # transforms.RescaleIntensity((0, 1)),
+        ]
+    )
     # Image filepaths
-    lores_filepath = os.path.join(os.getcwd(),
-                                  Path("images/sims/microtubules/lores"))
-    hires_filepath = os.path.join(os.getcwd(),
-                                  Path("images/sims/microtubules/hires"))
-    # noisetest_filepath = os.path.join(os.getcwd(),
-    #                               Path("images/sims/noise"))
+    # lores_filepath = os.path.join(os.getcwd(), Path("images/sims/microtubules/lores"))
+    # hires_filepath = os.path.join(os.getcwd(), Path("images/sims/microtubules/hires"))
+    noisetest_filepath = os.path.join(
+        os.getcwd(), Path("images/sims/noise/cuboidal_noise")
+    )
 
     # image datasets
-    lores_dataset = Custom_Dataset(dir_data=lores_filepath,
-                                   filename="mtubs_sim_*_lores.tif")
-    hires_dataset = Custom_Dataset(dir_data=hires_filepath,
-                                   filename="mtubs_sim_*_hires.tif")
-    # noisetest_dataset = Custom_Dataset(dir_data=lores_filepath,
-    #                                filename="test_*.tif")
+    # lores_dataset = Custom_Dataset(
+    #     dir_data=lores_filepath, filename="mtubs_sim_*_lores.tif"
+    # )
+    # hires_dataset = Custom_Dataset(
+    #     dir_data=hires_filepath, filename="mtubs_sim_*_hires.tif"
+    # )
+    noisetest_dataset = Custom_Dataset(
+        dir_data=noisetest_filepath, filename="test_*.tif", transform=transform
+    )
 
     # image dataloaders
-    lores_dataloader = DataLoader(lores_dataset,
-                                  batch_size=5,
-                                  shuffle=True,
-                                  num_workers=2)
-    hires_dataloader = DataLoader(hires_dataset,
-                                  batch_size=5,
-                                  shuffle=True,
-                                  num_workers=2)
-    # noisetest_dataloader = DataLoader(noisetest_dataset,
-    #                                   batch_size=5,
-    #                                   shuffle=True,
-    #                                   num_workers=2)
+    # lores_dataloader = DataLoader(
+    #     lores_dataset, batch_size=5, shuffle=True, num_workers=2
+    # )
+    # hires_dataloader = DataLoader(
+    #     hires_dataset, batch_size=5, shuffle=True, num_workers=2
+    # )
+    noisetest_dataloader = DataLoader(
+        noisetest_dataset, batch_size=5, shuffle=True, num_workers=2
+    )
 
     # iterator objects from dataloaders
-    lores_iterator = iter(lores_dataloader)
-    hires_iterator = iter(hires_dataloader)
-    # noisetest_iterator = iter(noisetest_dataloader)
+    # lores_iterator = iter(lores_dataloader)
+    # hires_iterator = iter(hires_dataloader)
+    noisetest_iterator = iter(noisetest_dataloader)
 
     # pull out a batch!
     # sometimes the iterators 'run out', this stops that from happening
     try:
-        lores_batch = next(lores_iterator)
-        hires_batch = next(hires_iterator)
-        # noisetest_batch = next(noisetest_iterator)
+        # lores_batch = next(lores_iterator)
+        # hires_batch = next(hires_iterator)
+        noisetest_batch = next(noisetest_iterator)
     except StopIteration:
-        lores_iterator = iter(lores_dataloader)
-        hires_iterator = iter(hires_dataloader)
-        # noisetest_iterator = iter(noisetest_dataloader)
-        lores_batch = next(lores_iterator)
-        hires_batch = next(hires_iterator)
-        # noisetest_batch = next(noisetest_iterator)
+        # lores_iterator = iter(lores_dataloader)
+        # hires_iterator = iter(hires_dataloader)
+        noisetest_iterator = iter(noisetest_dataloader)
+        # lores_batch = next(lores_iterator)
+        # hires_batch = next(hires_iterator)
+        noisetest_batch = next(noisetest_iterator)
 
     # print the batch shape
-    print(lores_batch.shape)
-    print(hires_batch.shape)
-    # print(noisetest_batch.shape)
+    # print(lores_batch.shape)
+    # print(hires_batch.shape)
+    print(noisetest_batch.shape)
+    # max and min values should be 1 and 0
+    print(noisetest_batch.max())
+    print(noisetest_batch.min())
 
 
 if __name__ == "__main__":

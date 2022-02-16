@@ -15,7 +15,7 @@ it will use a pytorch dataloader
 CURRENT ISSUES
 1. the projections are a single dimension large
 shouldn't a projection of a 3D image have two dimensions?
-2. the generator is stretching the image dims in Z by *batch_size
+2. the loss function doesn't take the batch or channel dimensions into account
 
 """
 
@@ -70,7 +70,7 @@ learning_rate = 3e-4
 freq_domain_loss_scaler = 1
 space_domain_loss_scaler = 1
 # batch size, i.e. #forward passes per backward propagation
-batch_size = 4
+batch_size = 5
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
@@ -184,6 +184,13 @@ for epoch in range(n_epochs):
         lores_yproj = projector(lores, 1)
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
+        # dims are [batch, 1, 49] for 96**3 shape images
+
+        # the z-projections comes from the generated image so must be backpropagation-sensitive
+        # not the case with the x/y-projections
+        # lores_xproj = lores_xproj.no_grad().to(device)
+        # lores_yproj = lores_yproj.no_grad().to(device)
+        # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
         freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
@@ -224,7 +231,8 @@ for epoch in range(n_epochs):
     with torch.no_grad():
         # pass low-z-res image through the generator
         genimg = gen(lores_batch)
-        genimg = genimg.cpu().numpy()
+        # pull out a single image
+        genimg = genimg[0, 0, :, :, :].cpu().numpy()
         # name your image grid according to which training iteration it came from
         genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
         print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")

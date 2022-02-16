@@ -52,8 +52,8 @@ class FourierProjection(object):
         image_size = torch.tensor(image.size(2)).item()
 
         # these are the cosine arguments to make a cosine window
-        # TODO in susan's code, the number 128 is used instead of image_size
-        # did I translate this correctly? or does 128 come from something else?
+        # TODO mysterious 128 in blackman-harris window
+        # I used image size here instead, is that correct
         cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
         # generate the sampling window
         sampling_window = torch.zeros(image_size)
@@ -107,11 +107,7 @@ class FourierProjectionLoss(nn.Module):
 
     def forward(self, x_proj, y_proj, z_proj):
 
-        # on the gpu you go
-        x_proj = x_proj.to(device)
-        y_proj = y_proj.to(device)
-        # the z_proj comes from the generated image, so must be backpropagation-sensitive
-        z_proj = torch.tensor(z_proj, requires_grad=True).to(device)
+        batch_size = torch.tensor(x_proj.size(0)).item()
 
         # this is the x and y projections (in a single tensor)
         xy_proj = torch.stack([x_proj, y_proj], dim=0)
@@ -121,17 +117,17 @@ class FourierProjectionLoss(nn.Module):
         # the loss is the difference between the log of the projections
         freq_domain_loss = torch.log(xy_proj) - torch.log(zz_proj)
         # take the absolute value to remove imaginary components, square them, and sum
-        freq_domain_loss = torch.sum(
-            torch.pow(torch.abs(freq_domain_loss), 2), dim=3
-        ).squeeze()
+        freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=-1)
+        # channels not needed here - remove the channels dimension!
+        freq_domain_loss = freq_domain_loss.squeeze()
 
-        # this is the mean loss when compared with the x axis
-        freq_domain_loss_x = torch.mean(freq_domain_loss[0, :], dim=0)
-        # this is the mean loss when compared with the y axis
-        freq_domain_loss_y = torch.mean(freq_domain_loss[1, :], dim=0)
-
-        # both means as a single tensor
-        freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
+        if batch_size > 1:
+            # this is the mean loss for the batch when compared with the x axis
+            freq_domain_loss_x = torch.mean(freq_domain_loss[0, :])
+            # this is the mean loss for the batch when compared with the y axis
+            freq_domain_loss_y = torch.mean(freq_domain_loss[1, :])
+            # both means as a single tensor
+            freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
         return freq_domain_loss
 
@@ -212,7 +208,9 @@ class Custom_Dataset(Dataset):
 
 class Generator(nn.Module):
     """
-    Convolutional Network Class
+    Convolutional Generational Network Class
+    Takes in 3D images and outputs 3D images of the same dimension
+
     fields:
     n_features, channel depth after convolution
     kernel_size (int), side length of cubic kernel
@@ -220,6 +218,10 @@ class Generator(nn.Module):
     """
 
     def __init__(self, n_features, kernel_size, padding=None):
+        """
+        formula for calculating dimensions after convolution
+        output = 1 + (input + 2*padding - kernel) / stride
+        """
 
         super(Generator, self).__init__()
 
@@ -239,7 +241,6 @@ class Generator(nn.Module):
         )
 
     def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
-        # better to go faster up and slower down
         return nn.Sequential(
             nn.Conv3d(
                 in_channels,
@@ -262,6 +263,8 @@ def initialise_weights(model):
     Weight Initiliaser
     input: the generator instance
     output: the generator instance, with initalised weights
+            (for the Conv3d and BatchNorm3d layers)
+
     """
     for m in model.modules():
         if isinstance(m, (nn.Conv3d, nn.BatchNorm3d)):
@@ -271,8 +274,9 @@ def initialise_weights(model):
 def test():
     """
     check that Custom_Dataset outputs datasets correctly
-    the 'noisetest' dataset has dimensions (96, 64, 32)
+    the 'noisetest' dataset has dimensions {x:96, y:64, z:32}
     and can thus be used to check that the batches are the right shape
+    each batch should have dimensions {batch_size, 1, z, y, x}
     """
 
     transform = tio.Compose(

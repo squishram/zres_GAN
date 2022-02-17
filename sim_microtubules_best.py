@@ -1,9 +1,3 @@
-import random as r
-import numpy as np
-from time import time
-from tifffile import imsave
-import torch
-
 """
 This code generates 3D images of simulated microtubules. Workflow:
 1. Uses a 3D random walk with constant step sizes
@@ -30,6 +24,12 @@ NOTE: cursory testing found 5^3 chunks for 96^3 voxel image to be fastest
 (faster than 4 chunks and 6 chunks for the same data)
 This translates to a (ROUGHLY) optimal voxels/chunk of 19
 """
+
+import random as r
+import numpy as np
+from time import time
+from tifffile import imsave
+import torch
 
 
 def rotation_matrix(axis, angle):
@@ -120,9 +120,9 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
         # if the microtubule leaves the imaging area
         # just re-initialize it somewhere else:
         if (
-            ((x[q] > (size_img[0] + 1)) or (x[q] < -1))
-            or ((y[q] > (size_img[1] + 1)) or (y[q] < -1))
-            or ((z[q] > (size_img[2] + 1)) or (z[q] < -1))
+            ((x[q] > (size_img[0] + 2)) or (x[q] < -1))
+            or ((y[q] > (size_img[1] + 2)) or (y[q] < -1))
+            or ((z[q] > (size_img[2] + 2)) or (z[q] < -1))
         ):
             # new random starting point:
             x[q] = r.uniform(0, size_img[0])
@@ -141,7 +141,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
             # make the vector unit length
             v = v / np.linalg.norm(v)
 
-            # rotate v about the normal to the plane created by v and i
+            # rotate v about the normal to the plane created by v and k
             # unless v is parallel to k, in which case rotate v about i
             if np.dot(v, k) == 1:
                 axis = i
@@ -278,7 +278,7 @@ time1 = time()
 
 # file specs:
 # how many images do you want?
-nimg = 1000
+nimg = 1
 # file name root:
 filename = "mtubs_sim_"
 # bittage of final image - 8, 16, 32, or 64?

@@ -70,7 +70,7 @@ def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
     """Make a normalized 1D Gaussian Kernel"""
     radius = math.ceil(sigma * sigmas)
     xs = np.array(range(-radius, radius + 1))
-    kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
+    kernel = np.exp(-(xs**2) / (2 * sigma**2))
     return torch.tensor(kernel / sum(kernel), dtype=torch.float)
 
 
@@ -162,7 +162,7 @@ def highpass_gaussian_kernel_fourier(sigma: float, N: int) -> torch.Tensor:
     centre = math.floor(N / 2)
     xs = torch.tensor(range(0, N), dtype=torch.float) - centre
 
-    space_domain = torch.exp(-(xs ** 2) / (2 * sigma ** 2))
+    space_domain = torch.exp(-(xs**2) / (2 * sigma**2))
     space_domain /= sum(space_domain)
 
     fourier = torch.fft.rfft(space_domain, dim=0)
@@ -217,7 +217,7 @@ for _ in range(1000):
         def closure():
             optimizer.zero_grad()
             # reco is the reconstruction (squared so guaranteed to be positive for realz)
-            reco = reconstruction ** 2
+            reco = reconstruction**2
 
             # create a blurred image from the reconstruction so you can now check if it matches the original data
             rendering = conv_1D_z_axis(reco, z_kernel, pad="edge")
@@ -258,7 +258,7 @@ for _ in range(1000):
 
     # loss = fourier_loss + rendering_loss
 
-    reco = reconstruction ** 2
+    reco = reconstruction**2
     loss = closure()
     recodata = reco.clone().detach()
 

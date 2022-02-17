@@ -22,6 +22,7 @@ shouldn't a projection of a 3D image have two dimensions?
 import os
 from pathlib import Path
 from datetime import date
+# import numpy as np
 import math
 import matplotlib.pyplot as plt
 import torch
@@ -51,8 +52,10 @@ today = today.replace("-", "")
 # path to data
 path_data = os.path.join(os.getcwd(), "images/sims/")
 # path to training samples (low-z-resolution, high-z-resolution)
-path_lores = os.path.join(path_data, Path("microtubules/lores"))
-path_hires = os.path.join(path_data, Path("microtubules/hires"))
+# path_lores = os.path.join(path_data, Path("microtubules/lores"))
+# path_hires = os.path.join(path_data, Path("microtubules/hires"))
+path_lores = os.path.join(path_data, Path("microtubules/lores_test"))
+path_hires = os.path.join(path_data, Path("microtubules/hires_test"))
 # path to gneerated images - will make directory if there isn't one already
 path_gens = os.path.join(path_data, Path("microtubules/generated"), today)
 os.makedirs(path_gens, exist_ok=True)
@@ -65,16 +68,16 @@ os.makedirs(path_gens, exist_ok=True)
 # use gpu if available, otherwise cpu
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
-learning_rate = 3e-4
+learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-freq_domain_loss_scaler = 1
+freq_domain_loss_scaler = 0
 space_domain_loss_scaler = 1
 # batch size, i.e. #forward passes per backward propagation
-batch_size = 5
+batch_size = 1
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 10
+n_epochs = 100
 # channel depth of generator hidden layers in integers of this number
 features_gen = 16
 # the side length of the convolutional kernel in the network
@@ -93,6 +96,9 @@ zres_lo = 600.0
 ############################
 
 # image datasets
+# TODO change the dataloader so these are loaded in pairs of images!
+# lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.tif")
+# hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
 lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.tif")
 hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
 
@@ -126,10 +132,11 @@ gen.train()
 
 # Loss and Optimisation
 # mean squared error loss
-criterion_mse = nn.MSELoss()
+# criterion_mse = nn.MSELoss()
+criterion_mse = nn.L1Loss()
 # fourier-transformed projection loss
 criterion_ftp = FourierProjectionLoss()
-# Adam optimiser is supposed to be the shit for generators
+# Adam optimiser is supposed to be 'the shit for generators'
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
 
@@ -193,17 +200,18 @@ for epoch in range(n_epochs):
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
-        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
+        # freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
+        freq_domain_loss = 0
 
         ####################################
         # LOSS AGGREGATION, BACKPRPAGATION #
         ####################################
 
         # add the x and y components of the frequency domain loss
-        freq_domain_loss = sum(freq_domain_loss)
+        # freq_domain_loss = sum(freq_domain_loss)
         # scale the loss appropriately
         space_domain_loss *= space_domain_loss_scaler
-        freq_domain_loss *= freq_domain_loss_scaler
+        # freq_domain_loss *= freq_domain_loss_scaler
         # total loss
         loss = space_domain_loss + freq_domain_loss
 
@@ -233,6 +241,8 @@ for epoch in range(n_epochs):
         genimg = gen(lores_batch)
         # pull out a single image
         genimg = genimg[0, 0, :, :, :].cpu().numpy()
+        # genimg = np.rot90(genimg, 1, [0, 2])
+        # genimg = np.rot90(genimg, 1, [1, 2])
         # name your image grid according to which training iteration it came from
         genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
         print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
@@ -246,7 +256,7 @@ for epoch in range(n_epochs):
     # = [x part of fourier loss, y part of fourier loss]
     print("backpropagation count:", step)
     print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
-    print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
+    # print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
 
 
 # make a metadata file

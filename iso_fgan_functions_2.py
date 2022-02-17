@@ -33,6 +33,25 @@ class FourierProjection(object):
         # the defaults are the coefficients for a blackman-harris window
         self.coeffs = coeffs
 
+    def hipass_gauss_kernel_fourier(self, image_size):
+        """
+        Make an unshifted Gaussian highpass filter in Fourier space. All real
+        """
+
+        filter = math.floor(image_size / 2)
+        # centre filter on origin
+        filter = torch.tensor(range(0, image_size), dtype=torch.float) - filter
+        # convert to gaussian distribution
+        filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
+        # normalise (to normal distribution)
+        filter /= sum(filter)
+        # compute the fourier transform of the distribution
+        filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
+        # must be on the gpu
+        filter = filter.to(device)
+
+        return filter
+
     def __call__(self, image, dim):
 
         # batch size - .item() to convert from tensor -> int
@@ -66,23 +85,9 @@ class FourierProjection(object):
         # fourier transform
         image = torch.abs(torch.fft.rfft(image, dim=2)) ** 2
 
-        # Highpass Gaussian Kernel Filter
-        # centre of the image (halfway point)
-        filter = math.floor(image_size / 2)
-        # centre filter on origin
-        filter = torch.tensor(range(0, image_size), dtype=torch.float) - filter
-        # convert to gaussian distribution
-        filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
-        # normalise (to normal distribution)
-        filter /= sum(filter)
-        # compute the fourier transform of the distribution
-        filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
-        # must be on the gpu
-        filter = filter.to(device)
-
         # apply highpass gaussian kernel filter to transformed image
         for idx in range(batch_size):
-            image[idx, 0, :] *= filter
+            image[idx, 0, :] *= self.hipass_gauss_kernel_fourier(image_size)
 
         return image
 
@@ -262,7 +267,6 @@ def initialise_weights(model):
     input: the generator instance
     output: the generator instance, with initalised weights
             (for the Conv3d and BatchNorm3d layers)
-            i.e. they are normally distributed with normal 0 and sigma 0.02
 
     """
     for m in model.modules():

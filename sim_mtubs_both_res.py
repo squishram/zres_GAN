@@ -22,7 +22,7 @@ to accomodate non-perfectly cuboidal chunks?
 
 NOTE: cursory testing found 5^3 chunks for 96^3 voxel image to be fastest
 (faster than 4 chunks and 6 chunks for the same data)
-This translates to a (ROUGHLY) optimal voxels/chunk of 19
+This translates to a (ROUGHLY) optimal voxels/chunk of 19 assuming linear relationship
 """
 
 from datetime import date
@@ -32,7 +32,7 @@ import os
 import random as r
 import numpy as np
 from time import time
-from tifffile import imsave
+from tifffile import imwrite
 import torch
 
 
@@ -106,7 +106,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
     y = np.zeros(t)
     z = np.zeros(t)
 
-    # unit vectors:
+    # unit vectors (j not needed):
     i = np.array([1, 0, 0])
     k = np.array([0, 0, 1])
 
@@ -153,7 +153,7 @@ def random_walk(t, size_img, max_step=0.25, sharpest=np.pi):
             # make the vector unit length
             v = v / np.linalg.norm(v)
 
-            # rotate v about the normal to the plane created by v and i
+            # rotate v about the normal to the plane created by v and k
             # unless v is parallel to k, in which case rotate v about i
             if np.dot(v, k) == 1:
                 axis = i
@@ -310,7 +310,7 @@ os.makedirs(path_hires, exist_ok=True)
 ##############
 
 # number of images to produce for each resolution:
-n_imgs = 200
+n_imgs = 250
 # file name root:
 filename = "mtubs_sim_"
 # bittage of final image - 8 | 16 | 32 | 64
@@ -359,9 +359,25 @@ sigma_tuple = (sigma_xy_mean, sigma_z_mean)
 # chunk specs #
 ###############
 
+# here we check if size_img % chunk_size == 0, so the number of chunks fits cleanly into the image size
+# if it doesn't, we check chunk_size == 20 and then chunk_size == 18, then chunk_size == 21...
+go_up = True
+counter = 0
 # how many chunks are we splitting the data into along each dimension?
-# (optimal found to be 5 for 96x96x96 voxels)
-n_chunks = np.array([5, 5, 5])
+# (optimal found to be 5 for 96x96x96 voxels, assume linear relation)
+n_chunks = 5
+
+while size_img[0] % n_chunks != 0:
+    n_chunks = 5
+    if go_up:
+        n_chunks += 1 + (counter // 2)
+        go_up = False
+    elif not go_up:
+        n_chunks -= (1 + (counter // 2))
+        go_up = True
+    counter += 1
+
+n_chunks = np.array([n_chunks for i in range(3)])
 # how much do the chunks overlap?
 overlap = 7 * sigma_xy_mean
 
@@ -428,36 +444,25 @@ for i in range(n_imgs):
         if idx == 0:
             filename_ind = filename + str(i + 1) + "_hires.tif"
             file_path = os.path.join(path_hires, filename_ind)
+            print(f"Writing to tiff: hires {i + 1}")
         # anisotropic version
         elif idx == 1:
             filename_ind = filename + str(i + 1) + "_lores.tif"
             file_path = os.path.join(path_lores, filename_ind)
-
-        # tracker
-        print("Writing to tiff: " + str(2 * i + 1 + idx))
+            print(f"Writing to tiff: lores {i + 1}")
 
         if img_bit == 8:
-            imsave(file_path, mtubs.astype(np.uint8))
+            imwrite(file_path, mtubs.astype(np.uint8))
         elif img_bit == 16:
-            imsave(file_path, mtubs.astype(np.uint16))
+            imwrite(file_path, mtubs.astype(np.uint16))
         elif img_bit == 32:
-            imsave(file_path, mtubs.astype(np.uint32))
+            imwrite(file_path, mtubs.astype(np.uint32))
 
 time2 = time()
 
-print("The image size, in voxels, is " + str(size_img))
-print("The overlap, in voxels, is " + str(overlap))
-print("The number of total steps is " + str(t))
-print("the mean xy-sigma is " + str(sigma_xy_mean))
-print("the mean z-sigma is " + str(sigma_z_mean))
-print(
-    "Done! To make "
-    + str(n_imgs)
-    + " "
-    + str(img_bit)
-    + "-bit images with "
-    + str(n_chunks[0])
-    + " chunks/axis took "
-    + str(time2 - time1)
-    + " seconds"
-)
+print(f"The image size, in voxels, is {size_img}")
+print(f"The overlap, in voxels, is {overlap}")
+print(f"The number of total steps is {t}")
+print(f"the mean xy-sigma is {sigma_xy_mean}")
+print(f"the mean z-sigma is {sigma_z_mean}")
+print(f"Done! To make {2 * n_imgs} {img_bit}-bit images with {n_chunks[0]} chunks/axis took {time2 - time1} seconds")

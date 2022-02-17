@@ -1,7 +1,10 @@
 /.vscode
 /_pycache_
 /images/catface/real
-/images/sims
+/images/sims/noise
+/images/sims/microtubules/hires
+/images/sims/microtubules/lores
+/images/sims/microtubules/generated
 /old-obsolete_code/
 /tutorials/
 /logs

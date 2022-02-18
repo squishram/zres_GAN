@@ -22,7 +22,7 @@ shouldn't a projection of a 3D image have two dimensions?
 import os
 from pathlib import Path
 from datetime import date
-# import numpy as np
+import numpy as np
 import math
 import matplotlib.pyplot as plt
 import torch
@@ -132,8 +132,7 @@ gen.train()
 
 # Loss and Optimisation
 # mean squared error loss
-# criterion_mse = nn.MSELoss()
-criterion_mse = nn.L1Loss()
+criterion_l1 = nn.L1Loss()
 # fourier-transformed projection loss
 criterion_ftp = FourierProjectionLoss()
 # Adam optimiser is supposed to be 'the shit for generators'
@@ -173,7 +172,7 @@ for epoch in range(n_epochs):
 
         # space domain loss is simply (hires - spres)**2
         # space_domain_loss = criterion_mse(spres, hires).to(device)
-        space_domain_loss = criterion_mse(spres, hires)
+        space_domain_loss = criterion_l1(spres, hires)
 
         #########################
         # FREQUENCY DOMAIN LOSS #
@@ -223,31 +222,30 @@ for epoch in range(n_epochs):
         opt_gen.step()
 
         # aggregate loss data
-        if step % 100 == 0:
+        if step % 50 == 0:
             loss_list[0].append(int(step))
             loss_list[1].append(float(freq_domain_loss))
             loss_list[2].append(float(space_domain_loss))
             loss_list[3].append(float(loss))
+            # using the 'with' method in conjunction with no_grad() simply
+            # disables grad calculations for the duration of the statement
+            # Thus, we can use it to generate a sample set of images without initiating
+            # a backpropagation calculation
+            with torch.no_grad():
+                # pass low-z-res image through the generator
+                genimg = gen(lores_batch)
+                # pull out a single image
+                genimg = genimg[0, 0, :, :, :].cpu().numpy()
+                # genimg = np.flipud(genimg)
+                # genimg = np.rot90(genimg)
+                # name your image grid according to which training iteration it came from
+                genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
+                print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
+                # save the sample image
+                imwrite(os.path.join(path_gens, genimg_name), genimg)
 
         # count the number of backpropagations
         step += 1
-
-    # using the 'with' method in conjunction with no_grad() simply
-    # disables grad calculations for the duration of the statement
-    # Thus, we can use it to generate a sample set of images without initiating
-    # a backpropagation calculation
-    with torch.no_grad():
-        # pass low-z-res image through the generator
-        genimg = gen(lores_batch)
-        # pull out a single image
-        genimg = genimg[0, 0, :, :, :].cpu().numpy()
-        # genimg = np.rot90(genimg, 1, [0, 2])
-        # genimg = np.rot90(genimg, 1, [1, 2])
-        # name your image grid according to which training iteration it came from
-        genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
-        print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
-        # save the sample image
-        imwrite(os.path.join(path_gens, genimg_name), genimg)
 
     # print the loss after each epoch
     # space_domain_loss.item()

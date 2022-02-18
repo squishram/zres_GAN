@@ -72,17 +72,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-# combos that seem to kind of 'work': 1e-3 & 1e2
 freq_domain_loss_scaler = 1e-3
-space_domain_loss_scaler = 1e2
+space_domain_loss_scaler = 1e-6
 # batch size, i.e. #forward passes per backward propagation
 batch_size = 1
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 500
-# after how many backpropagations do you generate a new image?
-when_to_make_a_pic = 100
+n_epochs = 100
 # channel depth of generator hidden layers in integers of this number
 features_gen = 16
 # the side length of the convolutional kernel in the network
@@ -227,7 +224,7 @@ for epoch in range(n_epochs):
         opt_gen.step()
 
         # aggregate loss data
-        if step % when_to_make_a_pic == 0:
+        if step % 20 == 0:
             loss_list[0].append(int(step))
             loss_list[1].append(float(freq_domain_loss))
             loss_list[2].append(float(space_domain_loss))

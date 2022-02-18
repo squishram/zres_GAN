@@ -51,7 +51,7 @@ class FourierProjection(object):
         # this is the side length of the projection
         image_size = torch.tensor(image.size(2)).item()
 
-        # these are the cosine arguments to make a cosine window
+        # these are the arguments to make a cosine window
         cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
         # generate the sampling window
         sampling_window = torch.zeros(image_size)
@@ -113,10 +113,11 @@ class FourierProjectionLoss(nn.Module):
         zz_proj = torch.stack([z_proj, z_proj], dim=0)
 
         # the loss is the difference between the log of the projections
-        freq_domain_loss = torch.log(xy_proj) - torch.log(zz_proj)
+        # + 1e-4
+        freq_domain_loss = torch.log(xy_proj + 1e-4) - torch.log(zz_proj + 1e-4)
         # take the absolute value to remove imaginary components, square them, and sum
         freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=-1)
-        # channels not needed here - remove the channels dimension!
+        # channels not needed here - remove the channels dimension
         freq_domain_loss = freq_domain_loss.squeeze()
 
         if batch_size > 1:

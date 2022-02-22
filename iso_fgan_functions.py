@@ -131,6 +131,86 @@ class FourierProjectionLoss(nn.Module):
         return freq_domain_loss
 
 
+class Custom_Dataset_Pairs(Dataset):
+    """
+    makes a pytorch dataset with torch.utils.data.Dataset as its only argument
+    this means it automatically includes a set of methods for loading datasets
+    of these, the following need to be overwritten on a 'per-case' basis:
+        __init__(self, *args, **kwargs),
+        which obtains data like filepath (and csv for supervised learning)
+
+        __len__(self),
+        which obtains the size of the dataset (dunno why this isn't standard)
+
+        __getitem__(self, idx)
+        which reads and transforms the images themselves
+        (this is more memory-efficient than doing this in __init__
+        because this way, not all the images are not stored in memory at once -
+        instead, they are read as required)
+    """
+
+    def __init__(self, dir_data: str, subdirs: tuple, filename: str, transform=None):
+        """
+        defines the directory & filenames of the images to be loaded
+        dir_data e.g. "~/Pictures/"
+        subdirs e.g. ("lores", "hires")
+        filename e.g. "image_*.tif"
+        """
+
+        # the directory containing the images
+        self.dir_data1 = Path(os.path.join(dir_data, subdirs[0]))
+        self.dir_data2 = Path(os.path.join(dir_data, subdirs[1]))
+        # the structure of the filename (e.g. "image_*.tif")
+        self.filename = filename
+        # list of filenames
+        self.files1 = sorted(self.dir_data1.glob(self.filename))
+        self.files2 = sorted(self.dir_data2.glob(self.filename))
+        # transform for the images, if defined
+        self.transform = transform
+
+    def __len__(self):
+        """
+        method for obtaining the total number of samples
+        """
+
+        return min(len(self.files1), len(self.files2))
+
+    def __getitem__(self, file):
+        """
+        method for obtaining one sample of data
+        the argument 'file':
+        is simply the index of the filenames listed in self.files
+        it is included in classes that call torch.utils.data.Dataset
+        and does not need to be defined anywhere else
+        """
+
+        # select image
+        img_path1 = os.path.join(self.dir_data1, self.files1[file])
+        img_path2 = os.path.join(self.dir_data2, self.files2[file])
+        # import image (scikit-image.io imports tiffs as np.array(z, x, y))
+        img1 = io.imread(img_path1)
+        img2 = io.imread(img_path2)
+        imgs = np.stack((img1, img2))
+        # now: img.shape = (2, z, x, y)
+        # choose datatype using numpy
+        imgs = np.asarray(imgs, dtype=np.float32)
+        # normalise to range (0, 1)
+        imgs = imgs / np.max(imgs)
+        # convert to tensor
+        imgs = torch.tensor(imgs)
+        # add channels dimensions
+        imgs = imgs.unsqueeze(1)
+        # now: imgs.shape = (2, 1, z, x, y)
+        imgs = torch.swapaxes(imgs, -2, -1)
+        # now: imgs.shape = (2, 1, z, y, x)
+
+        # apply transform from torchio library if defined
+        if self.transform:
+            imgs = self.transform(imgs)
+
+        return imgs
+
+
 class Custom_Dataset(Dataset):
     """
     makes a pytorch dataset with torch.utils.data.Dataset as its only argument
@@ -336,19 +416,18 @@ def test():
     each batch should have dimensions {batch_size, 1, z, y, x}
     """
 
-    transform = tio.Compose(
-        [
-            transforms.RescaleIntensity((0, 1)),
-            # transforms.ZNormalization(),
-            # transforms.RescaleIntensity((0, 1)),
-        ]
-    )
     # Image filepaths
     # lores_filepath = os.path.join(os.getcwd(), Path("images/sims/microtubules/lores"))
     # hires_filepath = os.path.join(os.getcwd(), Path("images/sims/microtubules/hires"))
-    noisetest_filepath = os.path.join(
-        os.getcwd(), Path("images/sims/noise/cuboidal_noise")
+    # noisetest_filepath = os.path.join(
+    #     os.getcwd(), Path("images/sims/noise/cuboidal_noise")
+    # )
+    dualtest_filepath = path_data = os.path.join(
+        os.getcwd(), Path("images/sims/microtubules")
     )
+    # subdirectories with lores and hires data
+    lores_subdir = "lores"
+    hires_subdir = "hires"
 
     # image datasets
     # lores_dataset = Custom_Dataset(
@@ -357,8 +436,13 @@ def test():
     # hires_dataset = Custom_Dataset(
     #     dir_data=hires_filepath, filename="mtubs_sim_*_hires.tif"
     # )
-    noisetest_dataset = Custom_Dataset(
-        dir_data=noisetest_filepath, filename="test_*.tif", transform=transform
+    # noisetest_dataset = Custom_Dataset(
+    #     dir_data=noisetest_filepath, filename="test_*.tif", transform=transform
+    # )
+    dualtest_dataset = Custom_Dataset_Pairs(
+        dir_data=dualtest_filepath,
+        subdirs=(lores_subdir, hires_subdir),
+        filename="mtubs_sim_*.tif",
     )
 
     # image dataloaders
@@ -368,36 +452,46 @@ def test():
     # hires_dataloader = DataLoader(
     #     hires_dataset, batch_size=5, shuffle=True, num_workers=2
     # )
-    noisetest_dataloader = DataLoader(
-        noisetest_dataset, batch_size=5, shuffle=True, num_workers=2
-    )
+    # noisetest_dataloader = DataLoader(
+    #     noisetest_dataset, batch_size=5, shuffle=True, num_workers=2
+    # )
+    dualtest_dataloader = DataLoader(dualtest_dataset, batch_size=5, shuffle=True)
 
     # iterator objects from dataloaders
     # lores_iterator = iter(lores_dataloader)
     # hires_iterator = iter(hires_dataloader)
-    noisetest_iterator = iter(noisetest_dataloader)
+    # noisetest_iterator = iter(noisetest_dataloader)
+    dualtest_iterator = iter(dualtest_dataloader)
 
     # pull out a batch!
     # sometimes the iterators 'run out', this stops that from happening
     try:
         # lores_batch = next(lores_iterator)
         # hires_batch = next(hires_iterator)
-        noisetest_batch = next(noisetest_iterator)
+        # noisetest_batch = next(noisetest_iterator)
+        dualtest_batch = next(dualtest_iterator)
     except StopIteration:
         # lores_iterator = iter(lores_dataloader)
-        # hires_iterator = iter(hires_dataloader)
-        noisetest_iterator = iter(noisetest_dataloader)
         # lores_batch = next(lores_iterator)
         # hires_batch = next(hires_iterator)
-        noisetest_batch = next(noisetest_iterator)
+        # hires_iterator = iter(hires_dataloader)
+        # noisetest_iterator = iter(noisetest_dataloader)
+        # noisetest_batch = next(noisetest_iterator)
+        dualtest_iterator = iter(dualtest_dataloader)
+        dualtest_batch = next(dualtest_iterator)
+
+    # pull out the lores and hires images
+    lores_batch = dualtest_batch[:, 0, :, :, :, :]
+    hires_batch = dualtest_batch[:, 1, :, :, :, :]
 
     # print the batch shape
-    # print(lores_batch.shape)
-    # print(hires_batch.shape)
-    print(noisetest_batch.shape)
+    print(f"lores batch shape is {lores_batch.shape}")
+    print(f"hires batch shape is {hires_batch.shape}")
     # max and min values should be 1 and 0
-    print(noisetest_batch.max())
-    print(noisetest_batch.min())
+    # print(lores_batch.max())
+    # print(lores_batch.min())
+    # print(hires_batch.max())
+    # print(hires_batch.min())
 
 
 if __name__ == "__main__":

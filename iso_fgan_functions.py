@@ -257,6 +257,63 @@ class Generator(nn.Module):
         return self.net(batch)
 
 
+class Discriminator(nn.Module):
+    """
+    Convolutional Generational Network Class
+    Takes in 3D images and outputs 3D images of the same dimension
+
+    fields:
+    n_features, channel depth after convolution
+    kernel_size (int), side length of cubic kernel
+    padding (int), count of padding blocks
+    """
+
+    def __init__(self, n_features):
+        """
+        formula for calculating dimensions after convolution
+        output = 1 + (input + 2*padding - kernel) / stride
+        for image size 96*96*96
+        45 = 1 + (96 - 6) / 2
+        9  = 1 + (45 - 5) / 3
+        3  = 1 + (9 - 3) / 3
+        1  = 1 + (3 - 3) / 3
+        """
+
+        super(Discriminator, self).__init__()
+        self.disc = nn.Sequential(
+            # 96
+            nn.Conv3d(1, n_features * 8, kernel_size=6, stride=3, padding=0),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 31
+            self.nn_block(n_features * 8, n_features * 4, 3, 2, 0),
+            # 15
+            self.nn_block(n_features * 4, n_features * 2, 3, 2, 0),
+            # 7
+            self.nn_block(n_features * 2, n_features * 1, 3, 2, 0),
+            # 3
+            nn.Conv3d(n_features * 1, 1, kernel_size=3, stride=2, padding=0),
+            # 1
+            nn.Sigmoid(),
+        )
+
+    def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
+        return nn.Sequential(
+            nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride,
+                padding,
+                bias=False,
+            ),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+    def forward(self, x):
+        return self.disc(x)
+
+
 def initialise_weights(model):
     """
     Weight Initiliaser

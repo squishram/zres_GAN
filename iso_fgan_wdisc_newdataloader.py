@@ -13,10 +13,9 @@ there is no discriminator in this version of the network
 it will use a pytorch dataloader
 
 CURRENT ISSUES
-1. the projections are a single dimension large
-shouldn't a projection of a 3D image have two dimensions?
-2. the loss function doesn't take the batch or channel dimensions into account
-3. remember that edge effects are due to convolutional layers (with padding)
+1. why do the projections have size (5, 49)? What is the significance of this?
+    I thought they would be 1-dimensional, or symmetrically two-dimensional.
+2. remember that edge effects are due to convolutional layers (with padding)
    just remove the outer frames before displaying the images
 
 """
@@ -56,13 +55,10 @@ today = today.replace("-", "")
 # path to data
 path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
 # subdirectories with lores and hires data
-lores_subdir = "lores_test"
-hires_subdir = "hires_test"
-# path to training samples (low-z-resolution, high-z-resolution)
-# path_lores = os.path.join(path_data, Path("microtubules/lores"))
-# path_hires = os.path.join(path_data, Path("microtubules/hires"))
-# path_lores = os.path.join(path_data, Path("microtubules/lores_test"))
-# path_hires = os.path.join(path_data, Path("microtubules/hires_test"))
+# lores_subdir = "lores_test"
+# hires_subdir = "hires_test"
+lores_subdir = "lores"
+hires_subdir = "hires"
 # path to gneerated images - will make directory if there isn't one already
 path_gens = os.path.join(path_data, Path("generated"), today)
 os.makedirs(path_gens, exist_ok=True)
@@ -86,11 +82,11 @@ adversary_gen_loss_scaler = 1
 loss_dis_real_scaler = 1e-4
 loss_dis_fake_scaler = 1e-4
 # batch size, i.e. #forward passes per backward propagation
-batch_size = 1
+batch_size = 5
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 500
+n_epochs = 5
 # after how many backpropagations do you generate a new image?
 save_increment = 50
 # channel depth of generator hidden layers in integers of this number
@@ -113,9 +109,6 @@ zres_lo = 600.0
 ############################
 
 # image datasets
-# TODO change the dataloader so these are loaded in pairs of images!
-# lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*.tif")
-# hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*.tif")
 dataset = Custom_Dataset_Pairs(
     dir_data=path_data,
     subdirs=(lores_subdir, hires_subdir),
@@ -125,18 +118,18 @@ dataset = Custom_Dataset_Pairs(
 # image dataloaders when loading in hires and lores together
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
-# image dataloaders when loading in hires and lores separately
-# lores_dataloader = DataLoader(
-#     lores_dataset, batch_size=batch_size, shuffle=False, num_workers=2
-# )
-# hires_dataloader = DataLoader(
-#     hires_dataset, batch_size=batch_size, shuffle=False, num_workers=2
-# )
-
-# pull out a single batch
+# pull out a single batch of data to look at
 data_iterator = iter(dataloader)
 data_batch = next(data_iterator)
 lores_batch = data_batch[:, 0, :, :, :, :].to(device)
+hires_batch = data_batch[:, 1, :, :, :, :]
+lowimg = lores_batch[0, 0, :, :, :].cpu().numpy()
+higimg = hires_batch[0, 0, :, :, :].numpy()
+# save the inputs (hires & lores) that make the generated image so we can compare fairly
+lowimg_name = "lores_img.tif"
+higimg_name = "hires_img.tif"
+imwrite(os.path.join(path_gens, lowimg_name), lowimg)
+imwrite(os.path.join(path_gens, higimg_name), higimg)
 
 ########################################
 # NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
@@ -267,7 +260,9 @@ for epoch in range(n_epochs):
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
-        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
+        freq_domain_loss, xy_proj, zz_proj = criterion_ftp(
+            lores_xproj, lores_yproj, spres_zproj
+        )
         # freq_domain_loss = 0
 
         # add the x and y components of the frequency domain loss
@@ -301,6 +296,41 @@ for epoch in range(n_epochs):
             loss_list[5].append(float(loss_dis_real))
             loss_list[6].append(float(loss_dis_fake))
             loss_list[7].append(float(loss_dis))
+
+            # let's graph the fourier projections down x, y, and z, to see how they look!
+            plt.figure()
+            x = np.linspace(
+                np.sum(xy_proj[0], axis=0).min(),
+                np.sum(xy_proj[0], axis=0).max(),
+                len(np.sum(xy_proj[0], axis=0)),
+            )
+
+            print(f"x axis is: {x.shape}")
+            print(f"xy_proj is {xy_proj.shape}")
+            print(f"np.sum(xy_proj[0], axis=0) is {np.sum(xy_proj[0], axis=0).shape}")
+            print(f"np.sum(xy_proj[1], axis=0) is {np.sum(xy_proj[1], axis=0).shape}")
+            print(f"zz_proj is {zz_proj.shape}")
+            print(f"zz_proj[0] is {zz_proj[0].shape}")
+            print(f"zz_proj[1] is {zz_proj[1].shape}")
+
+            plt.plot(x, np.sum(xy_proj[0], axis=0))
+            plt.plot(x, np.sum(xy_proj[1], axis=0))
+            plt.plot(x, np.sum(zz_proj[0], axis=0))
+            plt.xlabel("Distance (pixels)")
+            plt.ylabel("Signal (AU)")
+            plt.legend(
+                [
+                    "x-projection",
+                    "y-projection",
+                    "z-projection",
+                ],
+                loc="upper right",
+            )
+            plt.savefig(
+                os.path.join(path_gens, f"fourier_projections {int(step / save_increment)}"),
+                format="pdf",
+            )
+
             # using the 'with' method in conjunction with no_grad() simply
             # disables grad calculations for the duration of the statement
             # Thus, we can use it to generate a sample set of images without initiating
@@ -323,15 +353,15 @@ for epoch in range(n_epochs):
         step += 1
 
     # print the loss after each epoch
-    # space_domain_loss.item()
-    # = hires - lores; .item() converts from 0-dimensional tensor to a number
-    # space_domain_loss.cpu.attach.numpy()
-    # = [x part of fourier loss, y part of fourier loss]
     print(f"backpropagation count: {step}")
     print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
     print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
     print(f"Weighted 'GAN'-y Loss: {adversary_gen_loss.cpu().detach().numpy()}")
 
+
+############
+# METADATA #
+############
 
 # make a metadata file
 metadata = today + "_metadata.txt"
@@ -349,12 +379,18 @@ with open(metadata, "a") as file:
             "\nsize_img = " + str(size_img),
             "\nn_epochs = " + str(n_epochs),
             "\nfeatures_gen= " + str(features_gen),
+            "\nfreq_domain_loss_scaler= " + str(freq_domain_loss_scaler),
+            "\nspace_domain_loss_scaler= " + str(space_domain_loss_scaler),
+            "\nadversary_gen_loss_scaler= " + str(adversary_gen_loss_scaler),
+            "\nloss_dis_real_scaler= " + str(loss_dis_real_scaler),
+            "\nloss_dis_fake_scaler = " + str(loss_dis_fake_scaler),
         ]
     )
 # TODO make sure to add more about the network structures!
 
+plt.figure(1)
 # plot out all the losses:
-for i in range(1, len(loss_list)):
+for i in range(1, 5):
     plt.plot(loss_list[0], loss_list[i])
 # legend
 plt.xlabel("Backpropagation Count")
@@ -365,14 +401,30 @@ plt.legend(
         "space domain loss",
         "adversary generator loss",
         "total generator loss",
+    ],
+    loc="upper right",
+)
+
+print("Saving generator loss graph...")
+plt.savefig(os.path.join(path_gens, "generator losses"), format="pdf")
+
+plt.figure(2)
+# plot out all the losses:
+for i in range(5, len(loss_list)):
+    plt.plot(loss_list[0], loss_list[i])
+# legend
+plt.xlabel("Backpropagation Count")
+plt.ylabel("Total Loss")
+plt.legend(
+    [
         "real discriminator loss",
         "fake discriminator loss",
         "total discriminator loss",
     ],
-    loc="upper left",
+    loc="upper right",
 )
 
-print("Saving loss graph...")
-plt.savefig(os.path.join(path_gens, "losses"), format="pdf")
+print("Saving discriminator loss graph...")
+plt.savefig(os.path.join(path_gens, "discriminator losses"), format="pdf")
 
 print("Done!")

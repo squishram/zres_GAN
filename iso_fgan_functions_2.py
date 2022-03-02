@@ -70,7 +70,7 @@ class FourierProjection(object):
         # this is the side length of the projection
         image_size = torch.tensor(image.size(2)).item()
 
-        # these are the cosine arguments to make a cosine window
+        # these are the arguments to make a cosine window
         cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
         # generate the sampling window
         sampling_window = torch.zeros(image_size)

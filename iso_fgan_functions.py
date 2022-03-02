@@ -128,7 +128,11 @@ class FourierProjectionLoss(nn.Module):
             # both means as a single tensor
             freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
-        return freq_domain_loss
+        return (
+            freq_domain_loss,
+            xy_proj.squeeze().detach().cpu().numpy(),
+            zz_proj.squeeze().detach().cpu().numpy(),
+        )
 
 
 class Custom_Dataset_Pairs(Dataset):

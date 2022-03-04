@@ -6,8 +6,8 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from skimage import io
 from pathlib import Path
-import torchio as tio
-import torchio.transforms as transforms
+# import torchio as tio
+# import torchio.transforms as transforms
 
 
 # make sure calculations in these classes can be done on the GPU
@@ -39,52 +39,66 @@ class FourierProjection(object):
         batch_size = torch.tensor(image.size(0)).item()
 
         # projections for original data
-        # why are we projecting down two axes surely it should just be the one?
-        # information density okay godditt
+        # we project down two axes as a 1D signal feed is easier to fourier transform
         if dim == 0:
-            image = image.sum(3).sum(2)
+            projection = image.sum(3).sum(2)
         elif dim == 1:
-            image = image.sum(4).sum(2)
+            projection = image.sum(4).sum(2)
         elif dim == 2:
-            image = image.sum(4).sum(3)
+            projection = image.sum(4).sum(3)
 
         # this is the side length of the projection
-        image_size = torch.tensor(image.size(2)).item()
+        image_size = torch.tensor(projection.size(2)).item()
+
+        ################################################
+        # MAKING AND APPLYING A COSINE SAMPLING WINDOW #
+        ################################################
+        """
+        Signals are assumed periodic but are processed as discontinuous where
+        one period ends and another begins. Sampling windows bring the amplitude
+        of a signal towards 0 at the lobes where there is period change, forcing continuity and
+        reducing noise in the fourier transform
+        """
 
         # these are the arguments to make a cosine window
-        cos_args = torch.tensor(range(0, image_size)) * 2 * math.pi / image_size
+        cos_args = (2 * math.pi / image_size) * torch.tensor(range(image_size))
         # generate the sampling window
         sampling_window = torch.zeros(image_size)
+
         for idx, coefficient in enumerate(self.coeffs):
             sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
 
         # sampling_window must be on the same device as the image
         sampling_window = sampling_window.to(device)
         # apply the window to the projection
-        image *= sampling_window.expand((1, image_size))
+        projection *= sampling_window
 
-        # fourier transform
-        image = torch.abs(torch.fft.rfft(image, dim=2)) ** 2
+        ###########################################
+        # APPLYING THE FOURIER TRANSFORM & FILTER #
+        ###########################################
+
+        # fourier transform of the projection
+        projection = torch.abs(torch.fft.rfft(projection, dim=2)) ** 2
 
         # Highpass Gaussian Kernel Filter
         # centre of the image (halfway point)
         filter = math.floor(image_size / 2)
         # centre filter on origin
-        filter = torch.tensor(range(0, image_size), dtype=torch.float) - filter
+        filter = torch.tensor(range(image_size), dtype=torch.float) - filter
         # convert to gaussian distribution
         filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
         # normalise (to normal distribution)
         filter /= sum(filter)
-        # compute the fourier transform of the distribution
+        # compute the fourier transform of the filter TODO understand this?
         filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
         # must be on the gpu
         filter = filter.to(device)
 
         # apply highpass gaussian kernel filter to transformed image
         for idx in range(batch_size):
-            image[idx, 0, :] *= filter
+            projection[idx, 0, :] *= filter
 
-        return image
+        return projection
 
 
 class FourierProjectionLoss(nn.Module):

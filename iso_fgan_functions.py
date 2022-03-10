@@ -61,11 +61,15 @@ class FourierProjection(object):
         """
 
         # these are the arguments to make a cosine window
-        cos_args = (2 * math.pi / image_size) * torch.tensor(range(image_size))
+        # NOTE the denominator is
+        # image_size - 1 for the symmetric BH window
+        # image_size     for the periodic  BH window
+        cos_args = (2 * math.pi / image_size - 1) * torch.tensor(range(image_size))
         # generate the sampling window
         sampling_window = torch.zeros(image_size)
 
         for idx, coefficient in enumerate(self.coeffs):
+            # w(n) = coeffs[0] - coeffs[1]*cos(2*pi*n/N) + coeffs[2]*cos(4*pi*n/N) - coeffs[3]*cos(6*pi*n/N)
             sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
 
         # sampling_window must be on the same device as the image
@@ -76,23 +80,29 @@ class FourierProjection(object):
         ###########################################
         # APPLYING THE FOURIER TRANSFORM & FILTER #
         ###########################################
-
-        # fourier transform of the projection
-        projection = torch.abs(torch.fft.rfft(projection, dim=2)) ** 2
+        """
+        The use of the highpass filter is that it attenuates signal from the middle of a sample/ region
+        In a fourier-transformed image, the middle represents the low-res stuff (low-frequency)
+        We are trying to use a loss funciton that will detect how much high-res (high-frequency) stuff there is
+        so a highpass gaussian filter will allow the loss function to focus more exclusively on how much high-frequency information there is
+        """
 
         # Highpass Gaussian Kernel Filter
         # centre of the image (halfway point)
         filter = math.floor(image_size / 2)
-        # centre filter on origin
+        # centre filter on origin (this is just a list of pixel indexes)
         filter = torch.tensor(range(image_size), dtype=torch.float) - filter
         # convert to gaussian distribution
         filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
         # normalise (to normal distribution)
         filter /= sum(filter)
-        # compute the fourier transform of the filter TODO understand this?
+        # compute the fourier transform of the filter TODO understand why there is a fourier transform here?
         filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
         # must be on the gpu
         filter = filter.to(device)
+
+        # fourier transform of the projection itself
+        projection = torch.abs(torch.fft.rfft(projection, dim=2)) ** 2
 
         # apply highpass gaussian kernel filter to transformed image
         for idx in range(batch_size):
@@ -143,9 +153,14 @@ class FourierProjectionLoss(nn.Module):
             freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
         return (
+            # the fourier loss
             freq_domain_loss,
-            xy_proj.squeeze().detach().cpu().numpy(),
-            zz_proj.squeeze().detach().cpu().numpy(),
+            # the windowed, filtered, fourier transformed x projection
+            xy_proj[0].squeeze().detach().cpu().numpy(),
+            # the windowed, filtered, fourier transformed y projection
+            xy_proj[1].squeeze().detach().cpu().numpy(),
+            # the windowed, filtered, fourier transformed z projection
+            zz_proj[0].squeeze().detach().cpu().numpy(),
         )
 
 

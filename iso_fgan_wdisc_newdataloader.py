@@ -13,12 +13,9 @@ there is no discriminator in this version of the network
 it will use a pytorch dataloader
 
 CURRENT ISSUES
-1.  why do the projections have size (5, 49)? What is the significance of this?
-    I thought they would be 1-dimensional, or symmetrically two-dimensional.
-2.  remember that edge effects are due to convolutional layers (with padding)
+1.  remember that edge effects are due to convolutional layers (with padding)
     just remove the outer frames before displaying the images
-3.  why do we fourier transform both the image and the filter (in the functions section)
-
+2.  why do we fourier transform both the image and the filter (in the functions section)?
 """
 
 import os
@@ -75,16 +72,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-# combos that seem to kind of 'work': 1e-3 & 1e2
+# combos that seem to kind of 'work': 1e-3 & 1e2 & 1; 1e-4, 1e-4
 # for the generator:
-freq_domain_loss_scaler = 1e-3
+freq_domain_loss_scaler = 0
 space_domain_loss_scaler = 1e2
 adversary_gen_loss_scaler = 1
 # for the discriminator:
 loss_dis_real_scaler = 1e-4
 loss_dis_fake_scaler = 1e-4
 # batch size, i.e. #forward passes per backpropagation
-batch_size = 10
+batch_size = 5
 # side length of (cubic) images
 size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
@@ -106,9 +103,9 @@ zres_hi = 240.0
 # z-resolution in the anisotropic case
 zres_lo = 600.0
 
-############################
-# DATASETS AND DATALOADERS #
-############################
+##########################
+# DATASET AND DATALOADER #
+##########################
 
 # image datasets
 dataset = Custom_Dataset_Pairs(
@@ -119,6 +116,10 @@ dataset = Custom_Dataset_Pairs(
 
 # image dataloaders when loading in hires and lores together
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+
+##############
+# TEST IMAGE #
+##############
 
 # iterable from the dataloader
 data_iterator = iter(dataloader)
@@ -179,7 +180,7 @@ step = 0
 # this list contains the losses (to be plotted)
 loss_list = [[] for i in range(8)]
 # this list contains the fourier spectra (to be plotted)
-fourier_list = [[] for i in range(4)]
+fourier_list = [[] for i in range(3)]
 
 for epoch in range(n_epochs):
 
@@ -196,7 +197,7 @@ for epoch in range(n_epochs):
         # DISCRIMINATOR LOSS #
         ######################
         """
-        how good is the discriminator at not getting fooled by generator fakes?
+        how good is the discriminator at recognising real and fake images?
         """
 
         # pass the real images through the discriminator i.e. calculate D(x)
@@ -212,7 +213,7 @@ for epoch in range(n_epochs):
         # add the two components of the Discriminator loss
         loss_dis = loss_dis_real + loss_dis_fake
         # do the zero grad thing
-        dis.zero_grad()
+        opt_dis.zero_grad()
         # backpropagation to get the gradient
         loss_dis.backward()
         # take an appropriately sized step (gradient descent)
@@ -268,7 +269,7 @@ for epoch in range(n_epochs):
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
-        freq_domain_loss, xy_proj, zz_proj = criterion_ftp(
+        freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
             lores_xproj, lores_yproj, spres_zproj
         )
         # freq_domain_loss = 0
@@ -288,7 +289,7 @@ for epoch in range(n_epochs):
         loss_gen = space_domain_loss + freq_domain_loss + adversary_gen_loss
 
         # the zero grad thingy is come
-        gen.zero_grad()
+        opt_gen.zero_grad()
         # backpropagation to get the gradient
         loss_gen.backward()
         # gradient descent step
@@ -297,28 +298,38 @@ for epoch in range(n_epochs):
         if step % save_increment == 0:
             # aggregate loss data
             loss_list[0].append(int(step))
+            # generator loss: frequency domain
             loss_list[1].append(float(freq_domain_loss))
+            # generator loss: signal domain
             loss_list[2].append(float(space_domain_loss))
+            # generator loss: adversarial
             loss_list[3].append(float(adversary_gen_loss))
+            # generator loss: total
             loss_list[4].append(float(loss_gen))
+            # discriminator loss: detecting real isometric images
             loss_list[5].append(float(loss_dis_real))
+            # discriminator loss: detecting fake (generated) isometric images
             loss_list[6].append(float(loss_dis_fake))
+            # discriminator loss: total
             loss_list[7].append(float(loss_dis))
 
-            # graph the fourier projections down x, y, and z
-            x = np.linspace
+            # print(f"np.mean(xy_proj[0], axis=0) is {np.mean(xy_proj[0], axis=0).shape}")
+            # print(f"np.mean(xy_proj[1], axis=0) is {np.mean(xy_proj[1], axis=0).shape}")
+            # print(f"np.mean(xy_proj[1], axis=0) is {np.mean(zz_proj[0], axis=0).shape}")
 
-            print(f"xy_proj is {xy_proj.shape}")
-            print(f"np.sum(xy_proj[0], axis=0) is {np.sum(xy_proj[0], axis=0).shape}")
-            print(f"np.sum(xy_proj[1], axis=0) is {np.sum(xy_proj[1], axis=0).shape}")
-            print(f"zz_proj is {zz_proj.shape}")
-            print(f"zz_proj[0] is {zz_proj[0].shape}")
-            print(f"zz_proj[1] is {zz_proj[1].shape}")
+            # fourier_list[0] = np.concatenate((fourier_list[0], np.mean(xy_proj[0], axis=0)), axis=2)
+            # fourier_list[1] = np.concatenate((fourier_list[1], np.mean(xy_proj[1], axis=0)), axis=2)
+            # fourier_list[2] = np.concatenate((fourier_list[2], np.mean(zz_proj[0], axis=0)), axis=2)
 
-            fourier_list[0].append(int(step))
-            fourier_list[1].append(xy_proj[0])
-            fourier_list[2].append(xy_proj[1])
-            fourier_list[3].append(zz_proj[0])
+            # get fourier spectra
+            # this is is the fourier power spectrum for the x projection
+            fourier_list[0].append(np.mean(x_proj, axis=0))
+            # this is is the fourier power spectrum for the y projection
+            fourier_list[1].append(np.mean(y_proj, axis=0))
+            # this is is the fourier power spectrum for the z projection
+            fourier_list[2].append(np.mean(z_proj, axis=0))
+
+            print(len(fourier_list), len(fourier_list[0]), len(fourier_list[0][0]))
 
         # count the number of backpropagations
         step += 1
@@ -346,9 +357,10 @@ for epoch in range(n_epochs):
     print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
     print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
     print(f"Weighted 'GAN'-y Loss: {adversary_gen_loss.cpu().detach().numpy()}")
-    print(f"Discriminator Loss: {loss_dis_fake}")
-    print(f"Weighted 'GAN'-y Loss: {loss_dis_real}")
-    print(f"Weighted 'GAN'-y Loss: {loss_dis}")
+    print(f"Generator Total  Loss: {loss_gen.cpu().detach().numpy()}")
+    print(f"Discriminator fk Loss: {loss_dis_fake}")
+    print(f"Discriminator rl Loss: {loss_dis_real}")
+    print(f"Discriminator tt Loss: {loss_dis}")
 
 
 ############
@@ -431,27 +443,34 @@ plt.savefig(os.path.join(path_gens, "discriminator losses"), format="pdf")
 # PLOT THE PROFILE OF THE FOURIER SPECTRA #
 ###########################################
 
-plt.figure(2)
-# plot out all the fourier spectra
-for i in range(1, len(fourier_list)):
-    plt.plot(fourier_list[0], fourier_list[i])
+# convert to numpy array for faster calculations
+fourier_list = np.array(fourier_list)
+mean_fourier_spectra = np.mean(fourier_list, axis=1)
+error_bars = np.std(fourier_list, axis=1)
 
-plt.xlabel("Distance (pixels)")
-plt.ylabel("Signal (AU)")
-plt.legend(
-    [
-        "x-projection",
-        "y-projection",
-        "z-projection",
-    ],
-    loc="upper right",
-)
+# plt.figure(2)
+# for i in range(mean_fourier_spectra.shape[0]):
+#     plt.errorbar(range(mean_fourier_spectra.shape[1]), mean_fourier_spectra[i], yerr=error_bars[i])
 
-plt.savefig(
-    os.path.join(
-        path_gens, f"fourier_projections {int(step / save_increment)}"
-    ),
-    format="pdf",
-)
+for i in range(n_epochs):
+    plt.figure(i + 2)
+    for j in range(fourier_list.shape[0]):
+        plt.plot(range(fourier_list.shape[2]), fourier_list[j, i])
+
+    plt.xlabel("Frequency")
+    plt.ylabel("Signal (AU)")
+    plt.legend(
+        [
+            "x-projection",
+            "y-projection",
+            "z-projection",
+        ],
+        loc="upper right",
+    )
+
+    plt.savefig(
+        os.path.join(path_gens, f"fourier_projections_{i}"),
+        format="pdf",
+    )
 
 print("Done!")

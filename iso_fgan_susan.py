@@ -226,7 +226,7 @@ for _ in range(1000):
             rendering_loss = torch.sum((rendering - data_normal) ** 2)
             # fourier_loss = fourier_anisotropy_loss_pnorm(reco, sampling_window, hpf_ft)
 
-            # checking thst the fourier domain of the reconstructed z is consistent with the fourier domain of the xy data
+            # checking that the fourier domain of the reconstructed z is consistent with the fourier domain of the xy data
             data_x_projection = data_normal.sum(1).sum(0)
             data_y_projection = data_normal.sum(2).sum(0)
             reco_z_projection = reco.sum(2).sum(1)

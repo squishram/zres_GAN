@@ -35,8 +35,8 @@ for i in range(nimg):
 
     # normalise all the brightness values
     # then scale them up so that the brightest value is 255:
-    noise_img = (noise_img - np.mean(noise_img)) / np.std(noise_img)
-    noise_img = (noise_img / np.max(noise_img)) * 255
+    # noise_img = (noise_img - np.mean(noise_img)) / np.std(noise_img)
+    # noise_img = (noise_img / np.max(noise_img)) * 255
 
     # write to file
     filename_ind = filename + str(i + 1) + ".tif"

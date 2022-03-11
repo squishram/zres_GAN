@@ -345,13 +345,13 @@ t = 1000
 # size of final image in pixels:
 size_img = np.array([96, 96, 96])
 # step size each iteration (make it <0.5 if you want continuous microtubules):
-max_step = 1
+max_step = 2
 # how sharply can the path bend each step?
 sharpest = (np.pi * max_step) / 20
 # how many points plotted on each circle
 n_circle_points = 12
 # mean radius of circles, in pixels
-radius = 1.5
+radius = 5
 
 
 #############

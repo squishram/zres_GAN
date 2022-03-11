@@ -64,27 +64,25 @@ class FourierProjection(object):
         # NOTE the denominator is
         # image_size - 1 for the symmetric BH window
         # image_size     for the periodic  BH window
-        cos_args = (2 * math.pi / image_size - 1) * torch.tensor(range(image_size))
-        # generate the sampling window
-        sampling_window = torch.zeros(image_size)
-
-        for idx, coefficient in enumerate(self.coeffs):
-            # w(n) = coeffs[0] - coeffs[1]*cos(2*pi*n/N) + coeffs[2]*cos(4*pi*n/N) - coeffs[3]*cos(6*pi*n/N)
-            sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
-
-        # sampling_window must be on the same device as the image
-        sampling_window = sampling_window.to(device)
-        # apply the window to the projection
-        projection *= sampling_window
+        # cos_args = (2 * math.pi / image_size - 1) * torch.tensor(range(image_size))
+        # # generate the sampling window
+        # sampling_window = torch.zeros(image_size)
+        #
+        # for idx, coefficient in enumerate(self.coeffs):
+        #     # w(n) = coeffs[0] - coeffs[1]*cos(2*pi*n/N) + coeffs[2]*cos(4*pi*n/N) - coeffs[3]*cos(6*pi*n/N)
+        #     sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
+        #
+        # # sampling_window must be on the same device as the image
+        # sampling_window = sampling_window.to(device)
+        # # apply the window to the projection
+        # projection *= sampling_window
 
         ###########################################
         # APPLYING THE FOURIER TRANSFORM & FILTER #
         ###########################################
         """
-        The use of the highpass filter is that it attenuates signal from the middle of a sample/ region
-        In a fourier-transformed image, the middle represents the low-res stuff (low-frequency)
-        We are trying to use a loss funciton that will detect how much high-res (high-frequency) stuff there is
-        so a highpass gaussian filter will allow the loss function to focus more exclusively on how much high-frequency information there is
+        Filter ensures that projections are compared on the basis of
+        high-frequency information only
         """
 
         # Highpass Gaussian Kernel Filter
@@ -96,7 +94,7 @@ class FourierProjection(object):
         filter = torch.exp(-(filter**2) / (2 * self.sigma**2))
         # normalise (to normal distribution)
         filter /= sum(filter)
-        # compute the fourier transform of the filter TODO understand why there is a fourier transform here?
+        # compute the fourier transform of the filter
         filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
         # must be on the gpu
         filter = filter.to(device)
@@ -152,16 +150,17 @@ class FourierProjectionLoss(nn.Module):
             # both means as a single tensor
             freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
-        return (
-            # the fourier loss
-            freq_domain_loss,
-            # the windowed, filtered, fourier transformed x projection
-            xy_proj[0].squeeze().detach().cpu().numpy(),
-            # the windowed, filtered, fourier transformed y projection
-            xy_proj[1].squeeze().detach().cpu().numpy(),
-            # the windowed, filtered, fourier transformed z projection
-            zz_proj[0].squeeze().detach().cpu().numpy(),
-        )
+        # return (
+        #     # the fourier loss
+        #     freq_domain_loss,
+        #     # the windowed, filtered, fourier transformed x projection
+        #     xy_proj[0].squeeze().detach().cpu().numpy(),
+        #     # the windowed, filtered, fourier transformed y projection
+        #     xy_proj[1].squeeze().detach().cpu().numpy(),
+        #     # the windowed, filtered, fourier transformed z projection
+        #     zz_proj[0].squeeze().detach().cpu().numpy(),
+        # )
+        return freq_domain_loss
 
 
 class Custom_Dataset_Pairs(Dataset):

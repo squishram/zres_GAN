@@ -47,12 +47,18 @@ from tifffile import imwrite
 ###########
 
 # path to data
-path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
+# path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
+path_data = os.path.join(os.getcwd(), Path("images/sims/noise"))
 # subdirectories with lores and hires data
 # lores_subdir = "lores_test"
 # hires_subdir = "hires_test"
-lores_subdir = "lores"
-hires_subdir = "hires"
+# lores_subdir = "lores"
+# hires_subdir = "hires"
+lores_subdir = "cuboidal_noise"
+hires_subdir = "cuboidal_noise2"
+
+# filename = "mtubs_sim_*.tif"
+filename = "noise3d_*.tif"
 
 # path to generated images - will make directory if there isn't one already
 # get the date
@@ -72,14 +78,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-# combos that seem to kind of 'work': 1e-3 & 1e2 & 1; 1e-4, 1e-4
+# combos that seem to kind of 'work': 1e-3 & 1e2 & 1; 1, 1
 # for the generator:
-freq_domain_loss_scaler = 0
-space_domain_loss_scaler = 1e2
+freq_domain_loss_scaler = 1
+space_domain_loss_scaler = 1
 adversary_gen_loss_scaler = 1
 # for the discriminator:
-loss_dis_real_scaler = 1e-4
-loss_dis_fake_scaler = 1e-4
+loss_dis_real_scaler = 1
+loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
 # side length of (cubic) images
@@ -111,7 +117,7 @@ zres_lo = 600.0
 dataset = Custom_Dataset_Pairs(
     dir_data=path_data,
     subdirs=(lores_subdir, hires_subdir),
-    filename="mtubs_sim_*.tif",
+    filename=filename,
 )
 
 # image dataloaders when loading in hires and lores together
@@ -187,8 +193,8 @@ for epoch in range(n_epochs):
     for batch_idx, data in enumerate(dataloader):
 
         # pull out the lores and hires images
-        lores = data[:, 0, :, :, :, :].to(device=device, dtype=torch.float)
-        hires = data[:, 1, :, :, :, :].to(device=device, dtype=torch.float)
+        lores = data[:, 0].to(device=device, dtype=torch.float)
+        hires = data[:, 1].to(device=device, dtype=torch.float)
 
         # pass the low-z-res images through the generator to make improved z-res images
         spres = gen(lores)
@@ -211,15 +217,13 @@ for epoch in range(n_epochs):
         loss_dis_fake = criterion_bce(dis_fake, torch.zeros_like(dis_fake))
 
         # add the two components of the Discriminator loss
-        loss_dis = loss_dis_real + loss_dis_fake
+        loss_dis = (loss_dis_real * loss_dis_real_scaler) + (loss_dis_fake * loss_dis_fake_scaler)
         # do the zero grad thing
         opt_dis.zero_grad()
         # backpropagation to get the gradient
         loss_dis.backward()
         # take an appropriately sized step (gradient descent)
         opt_dis.step()
-
-        ###########################################################################################
 
         ##############################
         # GENERATOR ADVERSARIAL LOSS #
@@ -269,9 +273,10 @@ for epoch in range(n_epochs):
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
-        freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
-            lores_xproj, lores_yproj, spres_zproj
-        )
+        # freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
+        #     lores_xproj, lores_yproj, spres_zproj
+        # )
+        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
         # freq_domain_loss = 0
 
         # add the x and y components of the frequency domain loss
@@ -313,23 +318,16 @@ for epoch in range(n_epochs):
             # discriminator loss: total
             loss_list[7].append(float(loss_dis))
 
-            # print(f"np.mean(xy_proj[0], axis=0) is {np.mean(xy_proj[0], axis=0).shape}")
-            # print(f"np.mean(xy_proj[1], axis=0) is {np.mean(xy_proj[1], axis=0).shape}")
-            # print(f"np.mean(xy_proj[1], axis=0) is {np.mean(zz_proj[0], axis=0).shape}")
-
-            # fourier_list[0] = np.concatenate((fourier_list[0], np.mean(xy_proj[0], axis=0)), axis=2)
-            # fourier_list[1] = np.concatenate((fourier_list[1], np.mean(xy_proj[1], axis=0)), axis=2)
-            # fourier_list[2] = np.concatenate((fourier_list[2], np.mean(zz_proj[0], axis=0)), axis=2)
-
             # get fourier spectra
             # this is is the fourier power spectrum for the x projection
-            fourier_list[0].append(np.mean(x_proj, axis=0))
+            fourier_list[0].append(lores_xproj[0, 0].cpu().detach().numpy())
             # this is is the fourier power spectrum for the y projection
-            fourier_list[1].append(np.mean(y_proj, axis=0))
+            fourier_list[1].append(lores_yproj[0, 0].cpu().detach().numpy())
             # this is is the fourier power spectrum for the z projection
-            fourier_list[2].append(np.mean(z_proj, axis=0))
+            fourier_list[2].append(spres_zproj[0, 0].cpu().detach().numpy())
 
-            print(len(fourier_list), len(fourier_list[0]), len(fourier_list[0][0]))
+            print(np.array(fourier_list).shape)
+            # print(fourier_list)
 
         # count the number of backpropagations
         step += 1
@@ -423,7 +421,8 @@ plt.savefig(os.path.join(path_gens, "generator losses"), format="pdf")
 plt.figure(1)
 # plot out all the losses:
 for i in range(5, len(loss_list)):
-    plt.plot(loss_list[0], loss_list[i])
+    # plt.plot(loss_list[0], loss_list[i])
+    plt.semilogy(loss_list[0], loss_list[i])
 # legend
 plt.xlabel("Backpropagation Count")
 plt.ylabel("Total Loss")
@@ -448,11 +447,7 @@ fourier_list = np.array(fourier_list)
 mean_fourier_spectra = np.mean(fourier_list, axis=1)
 error_bars = np.std(fourier_list, axis=1)
 
-# plt.figure(2)
-# for i in range(mean_fourier_spectra.shape[0]):
-#     plt.errorbar(range(mean_fourier_spectra.shape[1]), mean_fourier_spectra[i], yerr=error_bars[i])
-
-for i in range(n_epochs):
+for i in range(fourier_list.shape[1]):
     plt.figure(i + 2)
     for j in range(fourier_list.shape[0]):
         plt.plot(range(fourier_list.shape[2]), fourier_list[j, i])
@@ -461,9 +456,9 @@ for i in range(n_epochs):
     plt.ylabel("Signal (AU)")
     plt.legend(
         [
-            "x-projection",
-            "y-projection",
-            "z-projection",
+            "low-res x power spectrum",
+            "low-res y power spectrum",
+            "super-res z power spectrum",
         ],
         loc="upper right",
     )

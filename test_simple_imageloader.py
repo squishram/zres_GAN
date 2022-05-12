@@ -1,46 +1,24 @@
-from pathlib import Path
-import os
-from skimage import io
-# from datetime import date
-import numpy as np
-import torch
-import math
+from sympy import symbols, Eq, solve
 
+stride = 1
+input = 128
+output = 64
 
-# full path to the image
-dir_path = os.path.join(os.getcwd(), Path("images/sims/microtubules/hires_test/"))
-# filename of the image, including extension
-img_name = "mtubs_sim_1_hires.tif"
-img_path = Path(os.path.join(dir_path, img_name))
-image = torch.from_numpy(np.array(io.imread(img_path), dtype="int16"))
+# defining symbols used in equations
+# or unknown variables
+padding, kernel = symbols('p,k')
 
-print(f"image shape is {image.shape}")
+# defining equations
+equation = Eq(2 * padding - kernel, output - 1 - (input / stride))
+print(solve(equation, (padding, kernel)))
 
-# projections for original data
-# we project down two axes as a 1D signal feed is easier to fourier transform
-x_projection = image.sum(1).sum(0)
-y_projection = image.sum(2).sum(0)
-z_projection = image.sum(2).sum(1)
+padding = [1, 1, 1]
+kernel = [3, 3, 3]
+stride = [2, 2, 1]
+inp = [128, 128, 32]
+out = []
 
-for image in [x_projection, y_projection, z_projection]:
+for i in range(3):
+    out.append(((inp[i] + (2 * padding[i]) - kernel[i]) / stride[i]) + 1)
 
-    # this is the side length of the projection
-    image_size = image.shape
-    image_size = image_size[0]
-
-    # cosine window arguments
-    cos_args = (2 * math.pi / image_size) * torch.tensor(range(image_size))
-
-    # generate the sampling window
-    sampling_window = torch.zeros(image_size)
-
-    # window coefficients (for BH window, [0.35875, 0.48829, 0.14128, 0.01168])
-    coeffs = [0.35875, 0.48829, 0.14128, 0.01168]
-
-    for idx, coefficient in enumerate(coeffs):
-        sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
-
-    print(f"sampling_window is {sampling_window}")
-
-    image = image.to(float)
-    image *= sampling_window
+print(out)

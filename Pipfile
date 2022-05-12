@@ -21,6 +21,7 @@ astropy = "*"
 pynvim = "*"
 torchio = "*"
 libtiff = "*"
+sympy = "*"
 
 [dev-packages]
 

@@ -9,10 +9,14 @@ it combines a pixel-to-pixel comparison of:
         lobe removal
         a high-pass filter
 
+there is no discriminator in this version of the network
+it will use a pytorch dataloader
+
 CURRENT ISSUES
 1.  remember that edge effects are due to convolutional layers (with padding)
     just remove the outer frames before displaying the images
-2.  get rid of the BH window, since it seems to heavily constrain the fourier spectra
+2.  why do we fourier transform both the image and the filter (in the functions section)?
+3.  get rid of the BH window, since it seems to heavily constrain the fourier spectra
     also: try other windows, compare L1Loss for the test image using different windows
 """
 
@@ -45,14 +49,14 @@ from tifffile import imwrite
 path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
 # path_data = os.path.join(os.getcwd(), Path("images/sims/noise"))
 # subdirectories with lores and hires data
-lores_subdir = "lores"
-hires_subdir = "hires"
+lores_subdir = "lores_undersampledz"
+hires_subdir = "hires_undersampledz"
 # lores_subdir = "lores_test"
 # hires_subdir = "hires_test"
 # lores_subdir = "cuboidal_noise"
 # hires_subdir = "cuboidal_noise2"
 
-filename = "mtubs_sim_*.tif"
+filename = "mtubs_sim_undersampledz*.tif"
 # filename = "noise3d_*.tif"
 
 # path to generated images - will make directory if there isn't one already
@@ -84,7 +88,7 @@ loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
 # side length of (cubic) images
-size_img = 96
+size_img = [128, 128, 32]
 # number of epochs i.e. number of times you re-use the same training images
 n_epochs = 10
 # after how many backpropagations do you generate a new image?
@@ -257,10 +261,13 @@ for epoch in range(n_epochs):
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
         lores_xproj = projector(lores, 0)
+        print(f"the dimensions of the projection {str(lores_xproj)} is {lores_xproj.size}")
         # ... for y dimension of original image
         lores_yproj = projector(lores, 1)
+        print(f"the dimensions of the projection {str(lores_yproj)} is {lores_yproj.size}")
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
+        print(f"the dimensions of the projection {str(lores_zproj)} is {lores_zproj.size}")
         # dims are [batch, 1, 49] for 96**3 shape images
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive

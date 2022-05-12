@@ -6,8 +6,6 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from skimage import io
 from pathlib import Path
-# import torchio as tio
-# import torchio.transforms as transforms
 
 
 # make sure calculations in these classes can be done on the GPU
@@ -26,12 +24,12 @@ class FourierProjection(object):
             which has been cosine-windowed and normalised
     """
 
-    def __init__(self, sigma, coeffs=[0.35875, 0.48829, 0.14128, 0.01168]):
+    def __init__(self, sigma, window=None):
 
         # standard deviation of PSF in z
         self.sigma = sigma
-        # the defaults are the coefficients for a blackman-harris window
-        self.coeffs = coeffs
+        # sampling window
+        self.window = window
 
     def __call__(self, image, dim):
 
@@ -50,9 +48,9 @@ class FourierProjection(object):
         # this is the side length of the projection
         image_size = torch.tensor(projection.size(2)).item()
 
-        ################################################
-        # MAKING AND APPLYING A COSINE SAMPLING WINDOW #
-        ################################################
+        ######################################################################
+        # MAKING AND APPLYING A SAMPLING WINDOW BEFORE THE FOURIER TRANSFORM #
+        ######################################################################
         """
         Signals are assumed periodic but are processed as discontinuous where
         one period ends and another begins. Sampling windows bring the amplitude
@@ -60,26 +58,39 @@ class FourierProjection(object):
         reducing noise in the fourier transform
         """
 
-        # these are the arguments to make a cosine window
-        # NOTE the denominator is
-        # image_size - 1 for the symmetric BH window
-        # image_size     for the periodic  BH window
-        # cos_args = (2 * math.pi / image_size - 1) * torch.tensor(range(image_size))
-        # # generate the sampling window
-        # sampling_window = torch.zeros(image_size)
-        #
-        # for idx, coefficient in enumerate(self.coeffs):
-        #     # w(n) = coeffs[0] - coeffs[1]*cos(2*pi*n/N) + coeffs[2]*cos(4*pi*n/N) - coeffs[3]*cos(6*pi*n/N)
-        #     sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
-        #
-        # # sampling_window must be on the same device as the image
-        # sampling_window = sampling_window.to(device)
-        # # apply the window to the projection
-        # projection *= sampling_window
+        # cosine arguments for sampling windows
+        cos_args = (2 * math.pi / image_size) * torch.tensor(range(image_size))
 
-        ###########################################
-        # APPLYING THE FOURIER TRANSFORM & FILTER #
-        ###########################################
+        # HANN WINDOW #
+        if self.window == "hann":
+            sampling_window = 0.5 * (1 - torch.cos(cos_args))
+
+            sampling_window = sampling_window.to(device)
+            projection *= sampling_window
+
+        # HAMMING WINDOW #
+        elif self.window == "hamming":
+            sampling_window = 0.56 - 0.46 * (1 - torch.cos(cos_args))
+
+            sampling_window = sampling_window.to(device)
+            projection *= sampling_window
+
+        # 4-TERM BLACKMAN-HARRIS WINDOW #
+        elif self.window == "bharris":
+            sampling_window = torch.zeros(image_size)
+            coeffs = [0.35875, 0.48829, 0.14128, 0.01168]
+            for idx, coefficient in enumerate(coeffs):
+                sampling_window += ((-1) ** idx) * coefficient * torch.cos(cos_args * idx)
+
+            sampling_window = sampling_window.to(device)
+            projection *= sampling_window
+
+        # fourier transform of the projection
+        projection = torch.abs(torch.fft.rfft(projection, dim=2)) ** 2
+
+        #########################################
+        # APPLYING THE HIGHPASS GAUSSIAN FILTER #
+        #########################################
         """
         Filter ensures that projections are compared on the basis of
         high-frequency information only
@@ -98,9 +109,6 @@ class FourierProjection(object):
         filter = 1 - torch.abs(torch.fft.rfft(filter, dim=0))
         # must be on the gpu
         filter = filter.to(device)
-
-        # fourier transform of the projection itself
-        projection = torch.abs(torch.fft.rfft(projection, dim=2)) ** 2
 
         # apply highpass gaussian kernel filter to transformed image
         for idx in range(batch_size):
@@ -150,16 +158,6 @@ class FourierProjectionLoss(nn.Module):
             # both means as a single tensor
             freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
-        # return (
-        #     # the fourier loss
-        #     freq_domain_loss,
-        #     # the windowed, filtered, fourier transformed x projection
-        #     xy_proj[0].squeeze().detach().cpu().numpy(),
-        #     # the windowed, filtered, fourier transformed y projection
-        #     xy_proj[1].squeeze().detach().cpu().numpy(),
-        #     # the windowed, filtered, fourier transformed z projection
-        #     zz_proj[0].squeeze().detach().cpu().numpy(),
-        # )
         return freq_domain_loss
 
 
@@ -328,14 +326,17 @@ class Generator(nn.Module):
     padding (int), count of padding blocks
     """
 
-    def __init__(self, n_features, kernel_size, padding=None):
+    def __init__(self, n_features, kernel_size=None, padding=None):
         """
         formula for calculating dimensions after convolution
         output = 1 + (input + 2*padding - kernel) / stride
         """
 
+        # class inheritance
         super(Generator, self).__init__()
 
+        if not kernel_size:
+            kernel_size = 3
         if not padding:
             padding = int(kernel_size / 2)
 

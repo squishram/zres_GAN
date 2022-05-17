@@ -2,10 +2,16 @@
 For calculating how to convolve each layer to the amount you want
 """
 
-padding = [2, 2, 1]
-kernel = [8, 8, 4]
-stride = [4, 4, 2]
-inp = [64, 64, 32]
+# kernel = [8, 8, 4]
+# stride = [4, 4, 2]
+# padding = [2, 2, 1]
+# kernel = [4, 4, 3]
+# stride = [2, 2, 1]
+# padding = [1, 1, 1]
+kernel = [2 for i in range(3)]
+stride = [2 for i in range(3)]
+padding = [0 for i in range(3)]
+inp = [32, 32, 32]
 out = []
 
 for i in range(3):

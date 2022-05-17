@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchio
 from iso_fgan_undersampledz_functions import (
     FourierProjection,
     FourierProjectionLoss,
@@ -83,8 +82,6 @@ adversary_gen_loss_scaler = 1
 # for the discriminator:
 loss_dis_real_scaler = 1
 loss_dis_fake_scaler = 1
-# size of image after cropping
-size_img = (64, 64, 32)
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
 # number of epochs i.e. number of times you re-use the same training images
@@ -107,9 +104,6 @@ zres_hi = 240.0
 zres_lo = 600.0
 # windowing function: can be hann, hamming, bharris
 window = "hamming"
-# define preprocessing transform:
-# - crop/pad the image to fit size_img
-transform = torchio.transforms.CropOrPad(size_img)
 
 ##########################
 # DATASET AND DATALOADER #
@@ -120,7 +114,6 @@ dataset = Custom_Dataset_Pairs(
     dir_data=path_data,
     subdirs=(lores_subdir, hires_subdir),
     filename=filename,
-    transform=transform,
 )
 
 # image dataloaders when loading in hires and lores together
@@ -172,6 +165,8 @@ hires_batch = data_batch[:, 1, :, :, :, :]
 # from the batch, pull out a single image each of hires and lores data
 lowimg = lores_batch[0, 0, :, :, :].cpu().numpy()
 higimg = hires_batch[0, 0, :, :, :].numpy()
+# how big are these images?
+size_img = lowimg.shape
 
 # save the inputs (hires & lores) that make the generated image so we can compare fairly
 lowimg_name = "lores_img.tif"
@@ -263,13 +258,13 @@ for epoch in range(n_epochs):
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
         lores_xproj = projector(lores, 0)
-        print(f"the dimensions of the projection {str(lores_xproj)} is {lores_xproj.size}")
+        print(f"the dimensions of the projection in x is {lores_xproj.shape}")
         # ... for y dimension of original image
         lores_yproj = projector(lores, 1)
-        print(f"the dimensions of the projection {str(lores_yproj)} is {lores_yproj.size}")
+        print(f"the dimensions of the projection in y is {lores_yproj.shape}")
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
-        print(f"the dimensions of the projection {str(lores_zproj)} is {lores_zproj.size}")
+        print(f"the dimensions of the projection in z is {spres_zproj.shape}")
         # dims are [batch, 1, 49] for 96**3 shape images
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive

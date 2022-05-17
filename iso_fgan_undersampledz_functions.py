@@ -386,23 +386,57 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
             # 128*128*32
-            nn.Conv3d(1, n_features * 8, kernel_size=[4, 4, 3], stride=[2, 2, 1], padding=[1, 1, 1]),
+            nn.Conv3d(1, n_features * 8, kernel_size=[3, 4, 4], stride=[1, 2, 2], padding=[1, 1, 1]),
             nn.LeakyReLU(0.2, inplace=True),
             # 64*64*32
-            # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [1, 1, 1]),
+            self.nn_block(n_features * 8, n_features * 4, [3, 4, 4], [1, 2, 2], [1, 1, 1]),
             # 32*32*32
-            self.nn_block(n_features * 8, n_features * 4, [4, 4, 3], [2, 2, 1], [1, 1, 1]),
-            # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [2, 2, 1]),
+            self.nn_block(n_features * 4, n_features * 2, 2, 2, 0),
             # 16*16*16
-            self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+            self.nn_block(n_features * 2, n_features * 1, 2, 2, 0),
             # 8*8*8
-            # self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+            nn.MaxPool3d(kernel_size=2, stride=2, padding=0),
             # 4*4*4
-            # nn.Conv3d(n_features * 2, n_features * 1, kernel_size=4, stride=1, padding=0),
-            nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+            nn.Conv3d(n_features * 1, 1, kernel_size=4, stride=1, padding=0),
             # 1*1*1
             nn.Sigmoid(),
         )
+        # self.disc = nn.Sequential(
+        #     # 128*128*32
+        #     nn.Conv3d(1, n_features * 8, kernel_size=[3, 4, 4], stride=[1, 2, 2], padding=[1, 1, 1]),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     # 64*64*32
+        #     self.nn_block(n_features * 8, n_features * 4, [3, 4, 4], [1, 2, 2], [1, 1, 1]),
+        #     # 32*32*32
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 16*16*16
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 8*8*8
+        #     self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+        #     # 4*4*4
+        #     nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+        #     # 1*1*1
+        #     nn.Sigmoid(),
+        # )
+        # self.disc = nn.Sequential(
+        #     # 128*128*32
+        #     nn.Conv3d(1, n_features * 8, kernel_size=[8, 8, 4], stride=[4, 4, 2], padding=[2, 2, 1]),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     # 64*64*32
+        #     # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [1, 1, 1]),
+        #     # 32*32*32
+        #     self.nn_block(n_features * 8, n_features * 4, [4, 4, 3], [2, 2, 1], [1, 1, 1]),
+        #     # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [2, 2, 1]),
+        #     # 16*16*16
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 8*8*8
+        #     # self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+        #     # 4*4*4
+        #     # nn.Conv3d(n_features * 2, n_features * 1, kernel_size=4, stride=1, padding=0),
+        #     nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+        #     # 1*1*1
+        #     nn.Sigmoid(),
+        # )
 
     def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
         return nn.Sequential(

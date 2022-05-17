@@ -340,7 +340,7 @@ class Generator(nn.Module):
         if not padding:
             padding = int(kernel_size / 2)
 
-        self.net = nn.Sequential(
+        self.gen = nn.Sequential(
             self.nn_block(1, n_features * 4, kernel_size, 1, padding),
             self.nn_block(n_features * 4, n_features * 2, kernel_size, 1, padding),
             self.nn_block(n_features * 2, n_features * 1, kernel_size, 1, padding),
@@ -367,13 +367,13 @@ class Generator(nn.Module):
         )
 
     def forward(self, batch):
-        return self.net(batch)
+        return self.gen(batch)
 
 
 class Discriminator(nn.Module):
     """
     Convolutional Generational Network Class
-    Takes in 3D images and outputs 3D images of the same dimension
+    Takes in 3D images and outputs a number between 1 and 0
 
     fields:
     n_features, channel depth after convolution
@@ -382,30 +382,25 @@ class Discriminator(nn.Module):
     """
 
     def __init__(self, n_features):
-        """
-        formula for calculating dimensions after convolution
-        output = 1 + (input + 2*padding - kernel) / stride
-        for image size 96*96*96
-        45 = 1 + (96 - 6) / 2
-        9  = 1 + (45 - 5) / 3
-        3  = 1 + (9 - 3) / 3
-        1  = 1 + (3 - 3) / 3
-        """
 
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
-            # 96
-            nn.Conv3d(1, n_features * 8, kernel_size=6, stride=3, padding=0),
+            # 128*128*32
+            nn.Conv3d(1, n_features * 8, kernel_size=[4, 4, 3], stride=[2, 2, 1], padding=[1, 1, 1]),
             nn.LeakyReLU(0.2, inplace=True),
-            # 31
-            self.nn_block(n_features * 8, n_features * 4, 3, 2, 0),
-            # 15
-            self.nn_block(n_features * 4, n_features * 2, 3, 2, 0),
-            # 7
-            self.nn_block(n_features * 2, n_features * 1, 3, 2, 0),
-            # 3
-            nn.Conv3d(n_features * 1, 1, kernel_size=3, stride=2, padding=0),
-            # 1
+            # 64*64*32
+            # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [1, 1, 1]),
+            # 32*32*32
+            self.nn_block(n_features * 8, n_features * 4, [4, 4, 3], [2, 2, 1], [1, 1, 1]),
+            # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [2, 2, 1]),
+            # 16*16*16
+            self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+            # 8*8*8
+            # self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+            # 4*4*4
+            # nn.Conv3d(n_features * 2, n_features * 1, kernel_size=4, stride=1, padding=0),
+            nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+            # 1*1*1
             nn.Sigmoid(),
         )
 

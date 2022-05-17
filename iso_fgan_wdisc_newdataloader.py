@@ -44,7 +44,7 @@ from tifffile import imwrite
 # path to data
 path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
 # path_data = os.path.join(os.getcwd(), Path("images/sims/noise"))
-# subdirectories with lores and hires data
+# names of subdirectories with lores and hires data
 lores_subdir = "lores"
 hires_subdir = "hires"
 # lores_subdir = "lores_test"
@@ -76,8 +76,8 @@ learning_rate = 1e-3
 # combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
 freq_domain_loss_scaler = 1
-space_domain_loss_scaler = 1
-adversary_gen_loss_scaler = 1
+space_domain_loss_scaler = 0
+adversary_gen_loss_scaler = 0
 # for the discriminator:
 loss_dis_real_scaler = 1
 loss_dis_fake_scaler = 1

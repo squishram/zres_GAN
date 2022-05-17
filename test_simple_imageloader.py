@@ -1,17 +1,5 @@
 from sympy import symbols, Eq, solve
 
-stride = 1
-input = 128
-output = 64
-
-# defining symbols used in equations
-# or unknown variables
-padding, kernel = symbols('p,k')
-
-# defining equations
-equation = Eq(2 * padding - kernel, output - 1 - (input / stride))
-print(solve(equation, (padding, kernel)))
-
 padding = [1, 1, 1]
 kernel = [3, 3, 3]
 stride = [2, 2, 1]

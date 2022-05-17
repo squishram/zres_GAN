@@ -9,16 +9,8 @@ it combines a pixel-to-pixel comparison of:
         lobe removal
         a high-pass filter
 
-there is no discriminator in this version of the network
-it will use a pytorch dataloader
-
-CURRENT ISSUES
-1. the projections are a single dimension large
-shouldn't a projection of a 3D image have two dimensions?
-2. the loss function doesn't take the batch or channel dimensions into account
-3. remember that edge effects are due to convolutional layers (with padding)
-   just remove the outer frames before displaying the images
-
+remember that edge effects are due to convolutional layers (with padding)
+just remove the outer frames before displaying the images
 """
 
 import os
@@ -30,17 +22,16 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from iso_fgan_functions import (
+import torchio
+from iso_fgan_undersampledz_functions import (
     FourierProjection,
     FourierProjectionLoss,
-    Custom_Dataset,
+    Custom_Dataset_Pairs,
     Generator,
     Discriminator,
     initialise_weights,
 )
 from torch.utils.data import DataLoader
-# import torchio.transforms as transforms
-# import torchio as tio
 from tifffile import imwrite
 
 
@@ -48,19 +39,30 @@ from tifffile import imwrite
 # STORAGE #
 ###########
 
+# path to data
+path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
+# path_data = os.path.join(os.getcwd(), Path("images/sims/noise"))
+# subdirectories with lores and hires data
+lores_subdir = "lores_undersampledz"
+hires_subdir = "hires_undersampledz"
+# lores_subdir = "lores_test"
+# hires_subdir = "hires_test"
+# lores_subdir = "cuboidal_noise"
+# hires_subdir = "cuboidal_noise2"
+
+filename = "mtubs_sim_undersampledz*.tif"
+# filename = "noise3d_*.tif"
+
+# path to generated images - will make directory if there isn't one already
 # get the date
 today = str(date.today())
 # remove dashes
 today = today.replace("-", "")
-# path to data
-path_data = os.path.join(os.getcwd(), "images/sims/")
-# path to training samples (low-z-resolution, high-z-resolution)
-# path_lores = os.path.join(path_data, Path("microtubules/lores"))
-# path_hires = os.path.join(path_data, Path("microtubules/hires"))
-path_lores = os.path.join(path_data, Path("microtubules/lores_test"))
-path_hires = os.path.join(path_data, Path("microtubules/hires_test"))
-# path to gneerated images - will make directory if there isn't one already
-path_gens = os.path.join(path_data, Path("microtubules/generated"), today)
+path_gens = os.path.join(path_data, Path("generated"), today)
+os.makedirs(path_gens, exist_ok=True)
+
+# path to saved networks (for retrieval/ testing)
+path_models = os.path.join(path_gens, Path("models"))
 os.makedirs(path_gens, exist_ok=True)
 
 
@@ -73,25 +75,25 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # learning rate
 learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
-# combos that seem to kind of 'work': 1e-3 & 1e2
+# combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
-freq_domain_loss_scaler = 1e-3
-space_domain_loss_scaler = 1e2
+freq_domain_loss_scaler = 1
+space_domain_loss_scaler = 1
 adversary_gen_loss_scaler = 1
 # for the discriminator:
-loss_dis_real_scaler = 1e-4
-loss_dis_fake_scaler = 1e-4
-# batch size, i.e. #forward passes per backward propagation
-batch_size = 1
-# side length of (cubic) images
-size_img = 96
+loss_dis_real_scaler = 1
+loss_dis_fake_scaler = 1
+# size of image after cropping
+size_img = (64, 64, 32)
+# batch size, i.e. #forward passes per backpropagation
+batch_size = 10
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 500
+n_epochs = 10
 # after how many backpropagations do you generate a new image?
 save_increment = 50
 # channel depth of generator hidden layers in integers of this number
 features_gen = 16
-# channel depth of generator hidden layers in integers of this number
+# channel depth of discriminator hidden layers in integers of this number
 features_dis = 16
 # the side length of the convolutional kernel in the network
 kernel_size = 3
@@ -103,29 +105,26 @@ size_pix_nm = 100.0
 zres_hi = 240.0
 # z-resolution in the anisotropic case
 zres_lo = 600.0
+# windowing function: can be hann, hamming, bharris
+window = "hamming"
+# define preprocessing transform:
+# - crop/pad the image to fit size_img
+transform = torchio.transforms.CropOrPad(size_img)
 
-############################
-# DATASETS AND DATALOADERS #
-############################
+##########################
+# DATASET AND DATALOADER #
+##########################
 
 # image datasets
-# TODO change the dataloader so these are loaded in pairs of images!
-# lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.tif")
-# hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
-lores_dataset = Custom_Dataset(dir_data=path_lores, filename="mtubs_sim_*_lores.tif")
-hires_dataset = Custom_Dataset(dir_data=path_hires, filename="mtubs_sim_*_hires.tif")
-
-# image dataloaders
-lores_dataloader = DataLoader(
-    lores_dataset, batch_size=batch_size, shuffle=False, num_workers=2
-)
-hires_dataloader = DataLoader(
-    hires_dataset, batch_size=batch_size, shuffle=False, num_workers=2
+dataset = Custom_Dataset_Pairs(
+    dir_data=path_data,
+    subdirs=(lores_subdir, hires_subdir),
+    filename=filename,
+    transform=transform,
 )
 
-# pull out a single batch
-lores_iterator = iter(lores_dataloader)
-lores_batch = lores_iterator.next().to(device)
+# image dataloaders when loading in hires and lores together
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
 ########################################
 # NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
@@ -136,7 +135,8 @@ sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 
 # this function can create filtered fourier projections
-projector = FourierProjection(sig_lores)
+# fields: z_sigma, window type
+projector = FourierProjection(sig_lores, window)
 
 # Generator Setup
 gen = Generator(features_gen, kernel_size, padding).to(device)
@@ -159,6 +159,26 @@ criterion_ftp = FourierProjectionLoss()
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
+##############
+# TEST IMAGE #
+##############
+
+# iterable from the dataloader
+data_iterator = iter(dataloader)
+# pull out a single batch of data
+data_batch = next(data_iterator)
+lores_batch = data_batch[:, 0, :, :, :, :].to(device)
+hires_batch = data_batch[:, 1, :, :, :, :]
+# from the batch, pull out a single image each of hires and lores data
+lowimg = lores_batch[0, 0, :, :, :].cpu().numpy()
+higimg = hires_batch[0, 0, :, :, :].numpy()
+
+# save the inputs (hires & lores) that make the generated image so we can compare fairly
+lowimg_name = "lores_img.tif"
+higimg_name = "hires_img.tif"
+imwrite(os.path.join(path_gens, lowimg_name), lowimg)
+imwrite(os.path.join(path_gens, higimg_name), higimg)
+
 
 ##################
 # IMPLEMENTATION #
@@ -166,19 +186,18 @@ opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
 # step += 1 for every forward pass
 step = 0
-# this list contains the losses
+# this list contains the losses (to be plotted)
 loss_list = [[] for i in range(8)]
+# this list contains the fourier spectra (to be plotted)
+fourier_list = [[] for i in range(3)]
 
 for epoch in range(n_epochs):
 
-    for batch_idx, lores in enumerate(lores_dataloader):
+    for batch_idx, data in enumerate(dataloader):
 
-        # iterate through the hi-res versions of the image as well!
-        hires = next(iter(hires_dataloader))
-
-        # send the batches of images to the gpu
-        lores = lores.to(device=device, dtype=torch.float)
-        hires = hires.to(device=device, dtype=torch.float)
+        # pull out the lores and hires images
+        lores = data[:, 0].to(device=device, dtype=torch.float)
+        hires = data[:, 1].to(device=device, dtype=torch.float)
 
         # pass the low-z-res images through the generator to make improved z-res images
         spres = gen(lores)
@@ -187,7 +206,7 @@ for epoch in range(n_epochs):
         # DISCRIMINATOR LOSS #
         ######################
         """
-        how good is the discriminator at not getting fooled by generator fakes?
+        how good is the discriminator at recognising real and fake images?
         """
 
         # pass the real images through the discriminator i.e. calculate D(x)
@@ -201,15 +220,13 @@ for epoch in range(n_epochs):
         loss_dis_fake = criterion_bce(dis_fake, torch.zeros_like(dis_fake))
 
         # add the two components of the Discriminator loss
-        loss_dis = loss_dis_real + loss_dis_fake
+        loss_dis = (loss_dis_real * loss_dis_real_scaler) + (loss_dis_fake * loss_dis_fake_scaler)
         # do the zero grad thing
-        dis.zero_grad()
+        opt_dis.zero_grad()
         # backpropagation to get the gradient
         loss_dis.backward()
         # take an appropriately sized step (gradient descent)
         opt_dis.step()
-
-        ###########################################################################################
 
         ##############################
         # GENERATOR ADVERSARIAL LOSS #
@@ -239,17 +256,20 @@ for epoch in range(n_epochs):
         ###################################
         """
         the frequency, or fourier component of the loss is =0 (note that this is oversimplified) when:
-        x_projection(fourier(img_original)) = y_projection(fourier(img_original)) = z_projection(fourier(img_optimised))
+        fourier(x_proj(img_original)) = fourier(y_proj(img_original)) = fourier(z_pro(img_optimised))
         z_projection(fourier(img_optimised)) gets a little closer to this outcome with each step
         """
 
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
         lores_xproj = projector(lores, 0)
+        print(f"the dimensions of the projection {str(lores_xproj)} is {lores_xproj.size}")
         # ... for y dimension of original image
         lores_yproj = projector(lores, 1)
+        print(f"the dimensions of the projection {str(lores_yproj)} is {lores_yproj.size}")
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
+        print(f"the dimensions of the projection {str(lores_zproj)} is {lores_zproj.size}")
         # dims are [batch, 1, 49] for 96**3 shape images
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive
@@ -259,6 +279,9 @@ for epoch in range(n_epochs):
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
         # loss calculation
+        # freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
+        #     lores_xproj, lores_yproj, spres_zproj
+        # )
         freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
         # freq_domain_loss = 0
 
@@ -277,53 +300,74 @@ for epoch in range(n_epochs):
         loss_gen = space_domain_loss + freq_domain_loss + adversary_gen_loss
 
         # the zero grad thingy is come
-        gen.zero_grad()
+        opt_gen.zero_grad()
         # backpropagation to get the gradient
         loss_gen.backward()
         # gradient descent step
         opt_gen.step()
 
-        # aggregate loss data
         if step % save_increment == 0:
+            # aggregate loss data
             loss_list[0].append(int(step))
+            # generator loss: frequency domain
             loss_list[1].append(float(freq_domain_loss))
+            # generator loss: signal domain
             loss_list[2].append(float(space_domain_loss))
+            # generator loss: adversarial
             loss_list[3].append(float(adversary_gen_loss))
+            # generator loss: total
             loss_list[4].append(float(loss_gen))
+            # discriminator loss: detecting real isometric images
             loss_list[5].append(float(loss_dis_real))
+            # discriminator loss: detecting fake (generated) isometric images
             loss_list[6].append(float(loss_dis_fake))
+            # discriminator loss: total
             loss_list[7].append(float(loss_dis))
-            # using the 'with' method in conjunction with no_grad() simply
-            # disables grad calculations for the duration of the statement
-            # Thus, we can use it to generate a sample set of images without initiating
-            # a backpropagation calculation
-            with torch.no_grad():
-                # pass low-z-res image through the generator
-                genimg = gen(lores_batch)
-                # pull out a single image
-                genimg = genimg[0, 0, :, :, :].cpu().numpy()
-                # TODO fix the images so you don't have to flip them and rotate 90 clockwise in imagej
-                # genimg = np.flipud(genimg)
-                # genimg = np.rot90(genimg)
-                # name your image grid according to which training iteration it came from
-                genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
-                print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
-                # save the sample image
-                imwrite(os.path.join(path_gens, genimg_name), genimg)
+
 
         # count the number of backpropagations
         step += 1
 
+    # using the 'with' method in conjunction with no_grad() simply
+    # disables grad calculations for the duration of the statement
+    # Thus, we can use it to generate a sample set of images without initiating
+    # a backpropagation calculation
+    with torch.no_grad():
+        # pass low-z-res image through the generator
+        genimg = gen(lores_batch)
+        # pull out a single image
+        genimg = genimg[0, 0, :, :, :].cpu().numpy()
+        # name your image grid according to which training iteration it came from
+        genimg_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
+        print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {genimg_name}")
+        # save the sample image
+        imwrite(os.path.join(path_gens, genimg_name), genimg)
+
+    # get fourier spectra
+    # this is is the fourier power spectrum for the x projection
+    fourier_list[0].append(lores_xproj[0, 0].cpu().detach().numpy())
+    # this is is the fourier power spectrum for the y projection
+    fourier_list[1].append(lores_yproj[0, 0].cpu().detach().numpy())
+    # this is is the fourier power spectrum for the z projection
+    fourier_list[2].append(spres_zproj[0, 0].cpu().detach().numpy())
+
+    # print(np.array(fourier_list).shape)
+    # print(fourier_list)
+
     # print the loss after each epoch
-    # space_domain_loss.item()
-    # = hires - lores; .item() converts from 0-dimensional tensor to a number
-    # space_domain_loss.cpu.attach.numpy()
-    # = [x part of fourier loss, y part of fourier loss]
     print(f"backpropagation count: {step}")
     print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
     print(f"Weighted Fourier Loss: {freq_domain_loss.cpu().detach().numpy()}")
     print(f"Weighted 'GAN'-y Loss: {adversary_gen_loss.cpu().detach().numpy()}")
+    print(f"Generator Total  Loss: {loss_gen.cpu().detach().numpy()}")
+    print(f"Discriminator fk Loss: {loss_dis_fake}")
+    print(f"Discriminator rl Loss: {loss_dis_real}")
+    print(f"Discriminator tt Loss: {loss_dis}")
 
+
+############
+# METADATA #
+############
 
 # make a metadata file
 metadata = today + "_metadata.txt"
@@ -341,12 +385,22 @@ with open(metadata, "a") as file:
             "\nsize_img = " + str(size_img),
             "\nn_epochs = " + str(n_epochs),
             "\nfeatures_gen= " + str(features_gen),
+            "\nfreq_domain_loss_scaler= " + str(freq_domain_loss_scaler),
+            "\nspace_domain_loss_scaler= " + str(space_domain_loss_scaler),
+            "\nadversary_gen_loss_scaler= " + str(adversary_gen_loss_scaler),
+            "\nloss_dis_real_scaler= " + str(loss_dis_real_scaler),
+            "\nloss_dis_fake_scaler = " + str(loss_dis_fake_scaler),
         ]
     )
 # TODO make sure to add more about the network structures!
 
+###########################
+# PLOT THE GENERATOR LOSS #
+###########################
+
+plt.figure(0)
 # plot out all the losses:
-for i in range(1, len(loss_list)):
+for i in range(1, 5):
     plt.plot(loss_list[0], loss_list[i])
 # legend
 plt.xlabel("Backpropagation Count")
@@ -357,14 +411,70 @@ plt.legend(
         "space domain loss",
         "adversary generator loss",
         "total generator loss",
+    ],
+    loc="upper right",
+)
+
+print("Saving generator loss graph...")
+plt.savefig(os.path.join(path_gens, "generator losses"), format="pdf")
+
+###############################
+# PLOT THE DISCRIMINATOR LOSS #
+###############################
+
+plt.figure(1)
+# plot out all the losses:
+for i in range(5, len(loss_list)):
+    # plt.plot(loss_list[0], loss_list[i])
+    plt.semilogy(loss_list[0], loss_list[i])
+# legend
+plt.xlabel("Backpropagation Count")
+plt.ylabel("Total Loss")
+plt.legend(
+    [
         "real discriminator loss",
         "fake discriminator loss",
         "total discriminator loss",
     ],
-    loc="upper left",
+    loc="upper right",
 )
 
-print("Saving loss graph...")
-plt.savefig(os.path.join(path_gens, "losses"), format="pdf")
+print("Saving discriminator loss graph...")
+plt.savefig(os.path.join(path_gens, "discriminator losses"), format="pdf")
+
+###########################################
+# PLOT THE PROFILE OF THE FOURIER SPECTRA #
+###########################################
+
+# convert to numpy array for faster calculations
+fourier_list = np.array(fourier_list)
+mean_fourier_spectra = np.mean(fourier_list, axis=1)
+error_bars = np.std(fourier_list, axis=1)
+
+for i in range(fourier_list.shape[1]):
+    plt.figure(i + 2)
+    for j in range(fourier_list.shape[0]):
+        plt.plot(range(fourier_list.shape[2]), fourier_list[j, i])
+
+    plt.xlabel("Frequency")
+    plt.ylabel("Signal (AU)")
+    plt.legend(
+        [
+            "low-res x power spectrum",
+            "low-res y power spectrum",
+            "super-res z power spectrum",
+        ],
+        loc="upper right",
+    )
+
+    plt.savefig(
+        os.path.join(path_gens, f"fourier_projections_{i}"),
+        format="pdf",
+    )
+
+
+# save the network parameters
+torch.save(gen.state_dict(), os.path.join(path_models))
+torch.save(dis.state_dict(), os.path.join(path_models))
 
 print("Done!")

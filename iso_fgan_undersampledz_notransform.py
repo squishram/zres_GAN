@@ -83,7 +83,7 @@ adversary_gen_loss_scaler = 1
 loss_dis_real_scaler = 1
 loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
-batch_size = 5
+batch_size = 10
 # number of epochs i.e. number of times you re-use the same training images
 n_epochs = 10
 # after how many backpropagations do you generate a new image?

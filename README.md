@@ -1,26 +1,26 @@
 **__AI For Forging Isotropic Resolution for 3D Micrographs (AFFIRM3D)__**
 
-__User Section__
+# User Section
 
-# What is this?
+## What is this?
   - AFFIRM3D is a generative adversarial network (GAN) for improving the z-resolution of a 3D microscopy image until it matches its x/y-resolution
   - In theory, AFFIRM3D will be suitable for use on all kinds of anisotropic images, including SMLM and confocal images
   - It will be trained using both simulated and experimental data
 
-# FAQ
-## AIs for use in micrograph augmentation are typically biased by the training process to search for particular structures. How does AFFIRM3D overcome this?
+## FAQ
+### AIs for use in micrograph augmentation are typically biased by the training process to search for particular structures. How does AFFIRM3D overcome this?
    - AFFIRM3D's loss function is heavily weighted in favour of what we call 'The Fourier Loss'
    - The Fourier Loss is calculated as the difference between the (high-pass filtered) fourier-transformed z-projection (the 'z-spectrum') and its xy counterparts
    - When training on experimental data, The Fourier Loss is the *only* loss used to train the generator network
-## Surely there needs to be some sensitivity to the actual locations of the structures in the training process?
+### Surely there needs to be some sensitivity to the actual locations of the structures in the training process?
    - The network undergoes a 'pre-training' process using simulated data, where the actual pixel values of the ground truth are also used to obtain the loss for training the network
    - Importantly, The Fourier Loss is still much more heavily weighted than the signal space loss
 
 
-__Developer Section__
+# Developer Section
 
-# TODO
-## 1: training on data with undersampled z
+## TODO
+### 1: training on data with undersampled z
    - [x] simulate undersampled
    - [ ] train network on them
      * issue: cannot calculate the fourier loss because the z-spectrum has less dimensions for undersampled data~
@@ -29,7 +29,7 @@ __Developer Section__
        + solution 2: find another way (would be better)
    - [ ] pass some of my data through it and see what happens
 
-## 2: getting some appropriate data
+### 2: getting some appropriate data
    - [x] simulate microtubules (undersampled z, with noise)
    - [ ] simulate mitochondria (or any other 2D structure) (undersampled z, with noise)
    - [ ] get my own 3D experimental data
@@ -37,7 +37,7 @@ __Developer Section__
    - [?] Double-Helix data
    - [?] Biplane data
 
-## 3: saving and retrieving models
+### 3: saving and retrieving models
    - [x] figure out how to do this (simple syntax)
    - [ ] figure out a training pattern
      1. train on simulated data, save model

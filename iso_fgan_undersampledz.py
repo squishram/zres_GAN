@@ -263,13 +263,13 @@ for epoch in range(n_epochs):
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
         lores_xproj = projector(lores, 0)
-        print(f"the dimensions of the projection {str(lores_xproj)} is {lores_xproj.size}")
+        print(f"the dimensions of the projection in x is {lores_xproj.shape}")
         # ... for y dimension of original image
         lores_yproj = projector(lores, 1)
-        print(f"the dimensions of the projection {str(lores_yproj)} is {lores_yproj.size}")
+        print(f"the dimensions of the projection in y is {lores_yproj.shape}")
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
-        print(f"the dimensions of the projection {str(lores_zproj)} is {lores_zproj.size}")
+        print(f"the dimensions of the projection in z is {spres_zproj.shape}")
         # dims are [batch, 1, 49] for 96**3 shape images
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive

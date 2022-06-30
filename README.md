@@ -20,32 +20,42 @@
 # Developer Section
 
 ## TODO
+
+### preliminary: seeing the effect of the microtubule density
+  - [x] simulate high-density microtubules
+  - [x] simulate low-density microtubules
+  - [x] test on cubic (non-undersampled) data, see what difference it makes!
+    * low-density microtubules didn't really work
+
 ### 1: training on data with undersampled z
-   - [x] simulate undersampled
-   - [ ] train network on them
-     * issue: cannot calculate the fourier loss because the z-spectrum has less dimensions for undersampled data~
-      making $loss = (y-spectrum + x-spectrum) - (2 * z-spectrum)$ impossible
+  - [x] simulate undersampled
+  - [ ] train network on them
+    * issue: cannot calculate the fourier loss because the z-spectrum has less dimensions for undersampled data making
+     $loss = (y-spectrum + x-spectrum) - (2 * z-spectrum)$
+     impossible
        + solution 1: use cubic crops of the image
-       + solution 2: find another way (would be better)
-   - [ ] pass some of my data through it and see what happens
+       + solution 2: bilinear interpolation of z-spectrum
+        * progress made: figured out how to do a bilinear interpolation
+  - [ ] pass some of my data through it and see what happens
 
 ### 2: getting some appropriate data
-   - [x] simulate microtubules (undersampled z, with noise)
-   - [ ] simulate mitochondria (or any other 2D structure) (undersampled z, with noise)
-   - [ ] get my own 3D experimental data
-   - [?] Jonas Ries data
-   - [?] Double-Helix data
-   - [?] Biplane data
+  - [x] simulate microtubules (undersampled z, with noise)
+  - [ ] simulate mitochondria (or any other 2D structure) (undersampled z, with noise)
+  - [ ] get my own 3D experimental data
+  - [ ] Jonas Ries data
+  - [ ] Double-Helix data
+  - [ ] Biplane data
+  - [ ] OpenCell data (Chan/Zucc database)
 
 ### 3: saving and retrieving models
-   - [x] figure out how to do this (simple syntax)
-   - [ ] figure out a training pattern
-     1. train on simulated data, save model
-     1. train on experimental data, save model
-     1. test on simulated and experimental data
-   - [ ] try it!
+  - [x] figure out how to do this (simple syntax)
+  - [ ] figure out a training pattern
+    1. train on simulated data, save model
+    1. train on experimental data, save model
+    1. test on simulated and experimental data
+  - [ ] try it!
 
 ## Overview
-   - training on simulated data seems like the best idea
-   - varying the size of the z-psf across simulated data
-   - but testing/verifying on real data is essential ofc
+  - training on simulated data seems like the best idea
+  - varying the size of the z-psf across simulated data
+  - but testing/verifying on real data is essential ofc

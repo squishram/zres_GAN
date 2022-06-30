@@ -6,7 +6,6 @@ name = "pypi"
 [packages]
 requests = "*"
 numpy = "*"
-torch = "*"
 torchvision = "*"
 tifffile = "*"
 scipy = "*"
@@ -18,10 +17,10 @@ flake8 = "*"
 albumentations = "*"
 pycodestyle = "*"
 astropy = "*"
-pynvim = "*"
 torchio = "*"
 libtiff = "*"
 sympy = "*"
+pyright = "*"
 
 [dev-packages]
 

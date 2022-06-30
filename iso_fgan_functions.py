@@ -143,13 +143,14 @@ class FourierProjectionLoss(nn.Module):
         zz_proj = torch.stack([z_proj, z_proj], dim=0)
 
         # the loss is the difference between the log of the projections
-        # + 1e-4
+        # + 1e-4 to ensure there is no log(0)
         freq_domain_loss = torch.log(xy_proj + 1e-4) - torch.log(zz_proj + 1e-4)
         # take the absolute value to remove imaginary components, square them, and sum
         freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=-1)
         # channels not needed here - remove the channels dimension
         freq_domain_loss = freq_domain_loss.squeeze()
 
+        # for batches of multiple images, take the mean as the loss
         if batch_size > 1:
             # this is the mean loss for the batch when compared with the x axis
             freq_domain_loss_x = torch.mean(freq_domain_loss[0, :])

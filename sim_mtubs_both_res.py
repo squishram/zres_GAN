@@ -299,8 +299,8 @@ today = today.replace("-", "")
 # path to data
 path_data = os.path.join(os.getcwd(), "images/sims/")
 # path to training samples (low-z-resolution, high-z-resolution)
-path_lores = os.path.join(path_data, Path("microtubules/lores"))
-path_hires = os.path.join(path_data, Path("microtubules/hires"))
+path_lores = os.path.join(path_data, Path("microtubules/lores_HD"))
+path_hires = os.path.join(path_data, Path("microtubules/hires_HD"))
 # make directories if they don't already exist so images have somewhere to go
 os.makedirs(path_lores, exist_ok=True)
 os.makedirs(path_hires, exist_ok=True)
@@ -312,7 +312,7 @@ os.makedirs(path_hires, exist_ok=True)
 # number of images to produce for each resolution:
 n_imgs = 250
 # file name root:
-filename = "mtubs_sim_"
+filename = "mtubs_sim_HD_"
 # bittage of final image - 8 | 16 | 32 | 64
 # 16-bit is as high as cameras usually go anyway
 img_bit = 16
@@ -323,7 +323,8 @@ img_bit = 16
 #####################
 
 # number of steps per walk:
-t = 5000
+# low < 2000, high > 10000
+t = 10000
 # size of final image in pixels:
 size_img = np.array([96, 96, 96])
 # step size each iteration (make it <0.5 if you want continuous microtubules):

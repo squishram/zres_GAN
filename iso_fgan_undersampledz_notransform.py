@@ -31,6 +31,7 @@ from iso_fgan_undersampledz_functions import (
     initialise_weights,
 )
 from torch.utils.data import DataLoader
+import scipy.interpolate as interpolate
 from tifffile import imwrite
 
 
@@ -258,14 +259,17 @@ for epoch in range(n_epochs):
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
         lores_xproj = projector(lores, 0)
-        print(f"the dimensions of the projection in x is {lores_xproj.shape}")
         # ... for y dimension of original image
         lores_yproj = projector(lores, 1)
-        print(f"the dimensions of the projection in y is {lores_yproj.shape}")
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
-        print(f"the dimensions of the projection in z is {spres_zproj.shape}")
-        # dims are [batch, 1, 49] for 96**3 shape images
+
+        # print(f"the dimensions of the projection in x is {lores_xproj.shape}")
+        # print(f"x-power spectrum example: {lores_xproj[0]}")
+        # print(f"the dimensions of the projection in y is {lores_yproj.shape}")
+        # print(f"y-power spectrum example: {lores_yproj[0]}")
+        # print(f"the dimensions of the projection in z is {spres_zproj.shape}")
+        # print(f"z-power spectrum example: {spres_zproj[0]}")
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive
         # not the case with the x/y-projections
@@ -273,11 +277,25 @@ for epoch in range(n_epochs):
         # lores_yproj = lores_yproj.no_grad().to(device)
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
+        # to hold interpolated z-spectra
+        spres_zproj_interp = np.zeros(lores_xproj.shape)
+
+        for batch_idx, z_spectrum in enumerate(spres_zproj):
+            # pull out a single z-spectra and turn it into an array on the cpu for processing
+            z_spectrum = z_spectrum.cpu().detach().numpy()
+            # make interpolation function which goes from 0:len(xy-spectrum) in len(z-spectrum) steps
+            f = interpolate.interp1d(np.linspace(0, lores_xproj.shape[2], z_spectrum.shape[1]), z_spectrum, "cubic")
+            # then interpolate the missing bits!
+            spres_zproj_interp[batch_idx] = f(np.arange(lores_xproj.shape[2]))
+
+        # turn interpolated data back into a tensor, put on the gpu
+        spres_zproj_interp = torch.from_numpy(spres_zproj_interp).to(device)
+
         # loss calculation
         # freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
         #     lores_xproj, lores_yproj, spres_zproj
         # )
-        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
+        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj_interp)
         # freq_domain_loss = 0
 
         # add the x and y components of the frequency domain loss
@@ -338,13 +356,13 @@ for epoch in range(n_epochs):
         # save the sample image
         imwrite(os.path.join(path_gens, genimg_name), genimg)
 
-    # get fourier spectra
-    # this is is the fourier power spectrum for the x projection
+    # get fourier power spectra...
+    # for the x projection
     fourier_list[0].append(lores_xproj[0, 0].cpu().detach().numpy())
-    # this is is the fourier power spectrum for the y projection
+    # for the y projection
     fourier_list[1].append(lores_yproj[0, 0].cpu().detach().numpy())
-    # this is is the fourier power spectrum for the z projection
-    fourier_list[2].append(spres_zproj[0, 0].cpu().detach().numpy())
+    # for the z projection
+    fourier_list[2].append(spres_zproj_interp[0, 0].cpu().detach().numpy())
 
     # print(np.array(fourier_list).shape)
     # print(fourier_list)

@@ -9,11 +9,8 @@ it combines a pixel-to-pixel comparison of:
         lobe removal
         a high-pass filter
 
-CURRENT ISSUES
-1.  remember that edge effects are due to convolutional layers (with padding)
-    just remove the outer frames before displaying the images
-2.  get rid of the BH window, since it seems to heavily constrain the fourier spectra
-    also: try other windows, compare L1Loss for the test image using different windows
+remember that edge effects are due to convolutional layers (with padding)
+just remove the outer frames before displaying the images
 """
 
 import os
@@ -25,15 +22,17 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from iso_fgan_functions import (
+from iso_fgan_UZ_funcs2 import (
     FourierProjection,
-    FourierProjectionLoss,
     Custom_Dataset_Pairs,
     Generator,
     Discriminator,
+    fourier_loss,
     initialise_weights,
 )
 from torch.utils.data import DataLoader
+# import scipy.interpolate as interpolate
+from scipy.interpolate import pchip
 from tifffile import imwrite
 
 
@@ -44,15 +43,15 @@ from tifffile import imwrite
 # path to data
 path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules"))
 # path_data = os.path.join(os.getcwd(), Path("images/sims/noise"))
-# names of subdirectories with lores and hires data
-lores_subdir = "lores_HD"
-hires_subdir = "hires_HD"
+# subdirectories with lores and hires data
+lores_subdir = "lores_undersampledz"
+hires_subdir = "hires_undersampledz"
 # lores_subdir = "lores_test"
 # hires_subdir = "hires_test"
 # lores_subdir = "cuboidal_noise"
 # hires_subdir = "cuboidal_noise2"
 
-filename = "mtubs_sim_*.tif"
+filename = "mtubs_sim_undersampledz_*.tif"
 # filename = "noise3d_*.tif"
 
 # path to generated images - will make directory if there isn't one already
@@ -61,6 +60,10 @@ today = str(date.today())
 # remove dashes
 today = today.replace("-", "")
 path_gens = os.path.join(path_data, Path("generated"), today)
+os.makedirs(path_gens, exist_ok=True)
+
+# path to saved networks (for retrieval/ testing)
+path_models = os.path.join(path_gens, Path("models"))
 os.makedirs(path_gens, exist_ok=True)
 
 
@@ -83,8 +86,6 @@ loss_dis_real_scaler = 1
 loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
-# side length of (cubic) images
-size_img = 96
 # number of epochs i.e. number of times you re-use the same training images
 n_epochs = 10
 # after how many backpropagations do you generate a new image?
@@ -110,6 +111,11 @@ window = "hamming"
 # DATASET AND DATALOADER #
 ##########################
 
+# print(path_data)
+# print(lores_subdir)
+# print(hires_subdir)
+# print(filename)
+
 # image datasets
 dataset = Custom_Dataset_Pairs(
     dir_data=path_data,
@@ -119,26 +125,6 @@ dataset = Custom_Dataset_Pairs(
 
 # image dataloaders when loading in hires and lores together
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-
-##############
-# TEST IMAGE #
-##############
-
-# iterable from the dataloader
-data_iterator = iter(dataloader)
-# pull out a single batch of data
-data_batch = next(data_iterator)
-lores_batch = data_batch[:, 0, :, :, :, :].to(device)
-hires_batch = data_batch[:, 1, :, :, :, :]
-# from the batch, pull out a single image each of hires and lores data
-lowimg = lores_batch[0, 0, :, :, :].cpu().numpy()
-higimg = hires_batch[0, 0, :, :, :].numpy()
-
-# save the inputs (hires & lores) that make the generated image so we can compare fairly
-lowimg_name = "lores_img.tif"
-higimg_name = "hires_img.tif"
-imwrite(os.path.join(path_gens, lowimg_name), lowimg)
-imwrite(os.path.join(path_gens, higimg_name), higimg)
 
 ########################################
 # NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
@@ -168,10 +154,32 @@ criterion_bce = nn.BCELoss()
 # mean squared error loss
 criterion_l1 = nn.L1Loss()
 # fourier-transformed projection loss
-criterion_ftp = FourierProjectionLoss()
+# criterion_ftp = FourierProjectionLoss()
 # Adam optimiser is supposed to be 'the shit for GANs'
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+
+##############
+# TEST IMAGE #
+##############
+
+# iterable from the dataloader
+data_iterator = iter(dataloader)
+# pull out a single batch of data
+data_batch = next(data_iterator)
+lores_batch = data_batch[:, 0, :, :, :, :].to(device)
+hires_batch = data_batch[:, 1, :, :, :, :]
+# from the batch, pull out a single image each of hires and lores data
+lowimg = lores_batch[0, 0, :, :, :].cpu().numpy()
+higimg = hires_batch[0, 0, :, :, :].numpy()
+# how big are these images?
+size_img = lowimg.shape
+
+# save the inputs (hires & lores) that make the generated image so we can compare fairly
+lowimg_name = "lores_img.tif"
+higimg_name = "hires_img.tif"
+imwrite(os.path.join(path_gens, lowimg_name), lowimg)
+imwrite(os.path.join(path_gens, higimg_name), higimg)
 
 
 ##################
@@ -261,7 +269,13 @@ for epoch in range(n_epochs):
         lores_yproj = projector(lores, 1)
         # ... for z dimension of generated image
         spres_zproj = projector(spres, 2)
-        # dims are [batch, 1, 49] for 96**3 shape images
+
+        # print(f"the dimensions of the projection in x is {lores_xproj.shape}")
+        # print(f"x-power spectrum example: {lores_xproj[0]}")
+        # print(f"the dimensions of the projection in y is {lores_yproj.shape}")
+        # print(f"y-power spectrum example: {lores_yproj[0]}")
+        # print(f"the dimensions of the projection in z is {spres_zproj.shape}")
+        # print(f"z-power spectrum example: {spres_zproj[0]}")
 
         # the z-projections comes from the generated image so must be backpropagation-sensitive
         # not the case with the x/y-projections
@@ -269,11 +283,36 @@ for epoch in range(n_epochs):
         # lores_yproj = lores_yproj.no_grad().to(device)
         # spres_zproj = spres_zproj.requires_grad_(True).to(device)
 
+        ########################################
+        # INTERPOLATION OF UNDERSAMPLED Z DATA #
+        ########################################
+
+        if spres_zproj.shape[2] != lores_xproj.shape[2]:
+            # to hold interpolated z-spectra
+            spres_zproj_interp = np.zeros(lores_xproj.shape)
+            for batch_idx, z_spectrum in enumerate(spres_zproj):
+                # pull out a single z-spectra and turn it into an array on the cpu for processing
+                z_spectrum = np.squeeze(z_spectrum.cpu().detach().numpy())
+                # z spectrum has A elements, xy spectra have B elements, where B > A
+                # so for the spectra to line up, graph z-spectra values from 0 to B, in A steps...
+                stretched_z_spectrum = np.linspace(0, lores_xproj.shape[2], z_spectrum.shape[0])
+                # ...then interpolate!
+                # generate interpolation function for x, y
+                f = pchip(stretched_z_spectrum, z_spectrum)
+                # now apply the function generated to upsampled x
+                spres_zproj_interp[batch_idx] = f(np.arange(lores_xproj.shape[2]))
+
+            # raise all negative values to zero
+            # spres_zproj_interp[spres_zproj_interp < 0] = 0
+            # turn interpolated data back into a tensor, put on the gpu
+            spres_zproj = torch.from_numpy(spres_zproj_interp).to(device)
+
         # loss calculation
         # freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
         #     lores_xproj, lores_yproj, spres_zproj
         # )
-        freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj)
+        # freq_domain_loss = criterion_ftp(lores_xproj, lores_yproj, spres_zproj_interp)
+        freq_domain_loss = fourier_loss(lores_xproj, lores_yproj, spres_zproj)
         # freq_domain_loss = 0
 
         # add the x and y components of the frequency domain loss
@@ -334,12 +373,12 @@ for epoch in range(n_epochs):
         # save the sample image
         imwrite(os.path.join(path_gens, genimg_name), genimg)
 
-    # get fourier spectra
-    # this is is the fourier power spectrum for the x projection
+    # get fourier power spectra...
+    # for the x projection
     fourier_list[0].append(lores_xproj[0, 0].cpu().detach().numpy())
-    # this is is the fourier power spectrum for the y projection
+    # for the y projection
     fourier_list[1].append(lores_yproj[0, 0].cpu().detach().numpy())
-    # this is is the fourier power spectrum for the z projection
+    # for the z projection
     fourier_list[2].append(spres_zproj[0, 0].cpu().detach().numpy())
 
     # print(np.array(fourier_list).shape)
@@ -462,5 +501,10 @@ for i in range(fourier_list.shape[1]):
         os.path.join(path_gens, f"fourier_projections_{i}"),
         format="pdf",
     )
+
+
+# save the network parameters
+torch.save(gen.state_dict(), os.path.join(path_models))
+torch.save(dis.state_dict(), os.path.join(path_models))
 
 print("Done!")

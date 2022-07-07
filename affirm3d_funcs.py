@@ -117,51 +117,6 @@ class FourierProjection(object):
         return projection
 
 
-class FourierProjectionLoss(nn.Module):
-    """
-    Loss Function Class
-    finds the loss of a z-projection with respect to an x-and-y-projection
-
-    all projections must have the same dimensions, but need not come from the same image
-    output: loss, as float
-    fields: none
-    args: highpass_filter(x,y,z-projections(fourier-transformed images))
-    """
-
-    def __init__(self):
-
-        # super() to inherit from parent class (standard for pytorch transforms)
-        super().__init__()
-
-    def forward(self, x_proj, y_proj, z_proj):
-
-        batch_size = torch.tensor(x_proj.size(0)).item()
-
-        # this is the x and y projections (in a single tensor)
-        xy_proj = torch.stack([x_proj, y_proj], dim=0)
-        # to calculate the loss compared to the z projection, we need to double it up
-        zz_proj = torch.stack([z_proj, z_proj], dim=0)
-
-        # the loss is the difference between the log of the projections
-        # + 1e-4 to ensure there is no log(0)
-        freq_domain_loss = torch.log(xy_proj + 1e-4) - torch.log(zz_proj + 1e-4)
-        # take the absolute value to remove imaginary components, square them, and sum
-        freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=-1)
-        # channels not needed here - remove the channels dimension
-        freq_domain_loss = freq_domain_loss.squeeze()
-
-        # for batches of multiple images, take the mean as the loss
-        if batch_size > 1:
-            # this is the mean loss for the batch when compared with the x axis
-            freq_domain_loss_x = torch.mean(freq_domain_loss[0, :])
-            # this is the mean loss for the batch when compared with the y axis
-            freq_domain_loss_y = torch.mean(freq_domain_loss[1, :])
-            # both means as a single tensor
-            freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
-
-        return freq_domain_loss
-
-
 class Custom_Dataset_Pairs(Dataset):
     """
     makes a pytorch dataset with torch.utils.data.Dataset as its only argument
@@ -341,7 +296,7 @@ class Generator(nn.Module):
         if not padding:
             padding = int(kernel_size / 2)
 
-        self.net = nn.Sequential(
+        self.gen = nn.Sequential(
             self.nn_block(1, n_features * 4, kernel_size, 1, padding),
             self.nn_block(n_features * 4, n_features * 2, kernel_size, 1, padding),
             self.nn_block(n_features * 2, n_features * 1, kernel_size, 1, padding),
@@ -368,13 +323,13 @@ class Generator(nn.Module):
         )
 
     def forward(self, batch):
-        return self.net(batch)
+        return self.gen(batch)
 
 
 class Discriminator(nn.Module):
     """
     Convolutional Generational Network Class
-    Takes in 3D images and outputs 3D images of the same dimension
+    Takes in 3D images and outputs a number between 1 and 0
 
     fields:
     n_features, channel depth after convolution
@@ -395,20 +350,58 @@ class Discriminator(nn.Module):
 
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
-            # 96
-            nn.Conv3d(1, n_features * 8, kernel_size=6, stride=3, padding=0),
+            # 128*128*32
+            nn.Conv3d(1, n_features * 8, kernel_size=[3, 4, 4], stride=[1, 2, 2], padding=[1, 1, 1]),
             nn.LeakyReLU(0.2, inplace=True),
-            # 31
-            self.nn_block(n_features * 8, n_features * 4, 3, 2, 0),
-            # 15
-            self.nn_block(n_features * 4, n_features * 2, 3, 2, 0),
-            # 7
-            self.nn_block(n_features * 2, n_features * 1, 3, 2, 0),
-            # 3
-            nn.Conv3d(n_features * 1, 1, kernel_size=3, stride=2, padding=0),
-            # 1
+            # 64*64*32
+            self.nn_block(n_features * 8, n_features * 4, [3, 4, 4], [1, 2, 2], [1, 1, 1]),
+            # 32*32*32
+            self.nn_block(n_features * 4, n_features * 2, 2, 2, 0),
+            # 16*16*16
+            self.nn_block(n_features * 2, n_features * 1, 2, 2, 0),
+            # 8*8*8
+            nn.MaxPool3d(kernel_size=2, stride=2, padding=0),
+            # 4*4*4
+            nn.Conv3d(n_features * 1, 1, kernel_size=4, stride=1, padding=0),
+            # 1*1*1
             nn.Sigmoid(),
         )
+        # self.disc = nn.Sequential(
+        #     # 128*128*32
+        #     nn.Conv3d(1, n_features * 8, kernel_size=[3, 4, 4], stride=[1, 2, 2], padding=[1, 1, 1]),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     # 64*64*32
+        #     self.nn_block(n_features * 8, n_features * 4, [3, 4, 4], [1, 2, 2], [1, 1, 1]),
+        #     # 32*32*32
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 16*16*16
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 8*8*8
+        #     self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+        #     # 4*4*4
+        #     nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+        #     # 1*1*1
+        #     nn.Sigmoid(),
+        # )
+        # self.disc = nn.Sequential(
+        #     # 128*128*32
+        #     nn.Conv3d(1, n_features * 8, kernel_size=[8, 8, 4], stride=[4, 4, 2], padding=[2, 2, 1]),
+        #     nn.LeakyReLU(0.2, inplace=True),
+        #     # 64*64*32
+        #     # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [1, 1, 1]),
+        #     # 32*32*32
+        #     self.nn_block(n_features * 8, n_features * 4, [4, 4, 3], [2, 2, 1], [1, 1, 1]),
+        #     # self.nn_block(n_features * 8, n_features * 4, [8, 8, 4], [4, 4, 2], [2, 2, 1]),
+        #     # 16*16*16
+        #     self.nn_block(n_features * 4, n_features * 2, 8, 4, 2),
+        #     # 8*8*8
+        #     # self.nn_block(n_features * 2, n_features * 1, 4, 2, 1),
+        #     # 4*4*4
+        #     # nn.Conv3d(n_features * 2, n_features * 1, kernel_size=4, stride=1, padding=0),
+        #     nn.Conv3d(n_features * 2, 1, kernel_size=4, stride=1, padding=0),
+        #     # 1*1*1
+        #     nn.Sigmoid(),
+        # )
 
     def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
         return nn.Sequential(
@@ -426,6 +419,35 @@ class Discriminator(nn.Module):
 
     def forward(self, x):
         return self.disc(x)
+
+
+def fourier_loss(x_proj, y_proj, z_proj):
+
+    batch_size = torch.tensor(x_proj.size(0)).item()
+
+    # this is the x and y projections (in a single tensor)
+    xy_proj = torch.stack([x_proj, y_proj], dim=0)
+    # to calculate the loss compared to the z projection, we need to double it up
+    zz_proj = torch.stack([z_proj, z_proj], dim=0)
+
+    # the loss is the difference between the log of the projections
+    # + 1e-4 to ensure there is no log(0)
+    freq_domain_loss = torch.log(xy_proj + 1e-4) - torch.log(zz_proj + 1e-4)
+    # take the absolute value to remove imaginary components, square them, and sum
+    freq_domain_loss = torch.sum(torch.pow(torch.abs(freq_domain_loss), 2), dim=-1)
+    # channels not needed here - remove the channels dimension
+    freq_domain_loss = freq_domain_loss.squeeze()
+
+    # for batches of multiple images, take the mean as the loss
+    if batch_size > 1:
+        # this is the mean loss for the batch when compared with the x axis
+        freq_domain_loss_x = torch.mean(freq_domain_loss[0, :])
+        # this is the mean loss for the batch when compared with the y axis
+        freq_domain_loss_y = torch.mean(freq_domain_loss[1, :])
+        # both means as a single tensor
+        freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
+
+    return freq_domain_loss
 
 
 def initialise_weights(model):

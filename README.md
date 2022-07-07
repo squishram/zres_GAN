@@ -29,13 +29,10 @@
 
 ### 1: training on data with undersampled z
   - [x] simulate undersampled
-  - [ ] train network on them
-    * issue: cannot calculate the fourier loss because the z-spectrum has less dimensions for undersampled data making
-     $loss = (y-spectrum + x-spectrum) - (2 * z-spectrum)$
-     impossible
-       + solution 1: use cubic crops of the image
-       + solution 2: bilinear interpolation of z-spectrum
-        * progress made: figured out how to do a bilinear interpolation
+  - [x] interpolate z-spectrum so it can be taken away from the xy-spectrum
+  - [_] fix <0 interpolated values to 0 to get rid of NaNs
+  - [_] offset pixel base values in image by a set value to get rid of this - try an increase of +100 to pixel values
+  - [ ] try a MONOTONIC INTERPOLATOR because cubic ones tend to overshoot
   - [ ] pass some of my data through it and see what happens
 
 ### 2: getting some appropriate data

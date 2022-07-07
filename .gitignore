@@ -1,12 +1,7 @@
 /.vscode
 /_pycache_
 /images
-# /images/catface/real
-# /images/sims/noise
-# /images/sims/microtubules/hires
-# /images/sims/microtubules/lores
-# /images/sims/microtubules/generated
-# /images/sims/mitochondria
+/guides
 /old-obsolete_code/
 /tutorials/
 /logs

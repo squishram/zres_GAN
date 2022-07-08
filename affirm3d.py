@@ -22,17 +22,17 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from iso_fgan_UZ_funcs2 import (
+from affirm3d_funcs import (
     FourierProjection,
     Custom_Dataset_Pairs,
     Generator,
     Discriminator,
     fourier_loss,
     initialise_weights,
+    # monotonic_cubic_interpolation,
+    over_interpolate_method,
 )
 from torch.utils.data import DataLoader
-# import scipy.interpolate as interpolate
-from scipy.interpolate import pchip
 from tifffile import imwrite
 
 
@@ -130,7 +130,7 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_worker
 # NETWORKS, LOSS FUNCTIONS, OPTIMISERS #
 ########################################
 
-# sigma for real (lores) and isometric (hires) data
+# sigma for real (lores) and isomorphic (hires) data
 sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 
@@ -287,25 +287,9 @@ for epoch in range(n_epochs):
         # INTERPOLATION OF UNDERSAMPLED Z DATA #
         ########################################
 
+        # if z-spectrum is undersampled with respect to x-spectrum, then upsample it by interpolation
         if spres_zproj.shape[2] != lores_xproj.shape[2]:
-            # to hold interpolated z-spectra
-            spres_zproj_interp = np.zeros(lores_xproj.shape)
-            for batch_idx, z_spectrum in enumerate(spres_zproj):
-                # pull out a single z-spectra and turn it into an array on the cpu for processing
-                z_spectrum = np.squeeze(z_spectrum.cpu().detach().numpy())
-                # z spectrum has A elements, xy spectra have B elements, where B > A
-                # so for the spectra to line up, graph z-spectra values from 0 to B, in A steps...
-                stretched_z_spectrum = np.linspace(0, lores_xproj.shape[2], z_spectrum.shape[0])
-                # ...then interpolate!
-                # generate interpolation function for x, y
-                f = pchip(stretched_z_spectrum, z_spectrum)
-                # now apply the function generated to upsampled x
-                spres_zproj_interp[batch_idx] = f(np.arange(lores_xproj.shape[2]))
-
-            # raise all negative values to zero
-            # spres_zproj_interp[spres_zproj_interp < 0] = 0
-            # turn interpolated data back into a tensor, put on the gpu
-            spres_zproj = torch.from_numpy(spres_zproj_interp).to(device)
+            spres_zproj = over_interpolate_method(lores_xproj, spres_zproj)
 
         # loss calculation
         # freq_domain_loss, x_proj, y_proj, z_proj = criterion_ftp(
@@ -347,9 +331,9 @@ for epoch in range(n_epochs):
             loss_list[3].append(float(adversary_gen_loss))
             # generator loss: total
             loss_list[4].append(float(loss_gen))
-            # discriminator loss: detecting real isometric images
+            # discriminator loss: detecting real isomorphic images
             loss_list[5].append(float(loss_dis_real))
-            # discriminator loss: detecting fake (generated) isometric images
+            # discriminator loss: detecting fake (generated) isomorphic images
             loss_list[6].append(float(loss_dis_fake))
             # discriminator loss: total
             loss_list[7].append(float(loss_dis))

@@ -3,8 +3,10 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from skimage import io
+from scipy.interpolate import pchip_interpolate
 from pathlib import Path
 
 
@@ -419,6 +421,89 @@ class Discriminator(nn.Module):
 
     def forward(self, x):
         return self.disc(x)
+
+
+def monotonic_cubic_interpolation(lores_xproj, spres_zproj):
+    """
+    Uses monotonic cubic interpolation
+    to raise the sampling rate of spres_zproj to that of lores_xproj
+
+    Args:
+        lores_xproj (numpy array of dims [batch, 1, measurements])
+        contains measurements of power spectrum from 3D image as measured down the x-dimension
+        spres_zproj (numpy array of dims [batch, 1, measurements])
+        contains measurements of power spectrum from 3D image as measured down the z-dimension
+    """
+
+    if spres_zproj.shape[2] != lores_xproj.shape[2]:
+        # to hold interpolated z-spectra
+        spres_zproj_interp = np.zeros(lores_xproj.shape)
+
+        for batch_idx, z_spectrum in enumerate(spres_zproj):
+            # pull out a single z-spectra and turn it into an array on the cpu for processing
+            z_spectrum = np.squeeze(z_spectrum.cpu().detach().numpy())
+            # z spectrum has A elements, xy spectra have B elements, where B > A
+            # so for the spectra to line up, graph z-spectra values from 0 to B, in A steps...
+            stretched_z_spectrum = np.linspace(0, lores_xproj.shape[2], z_spectrum.shape[0])
+            # ...then interpolate!
+            # generate interpolation function for x, y
+            f = pchip_interpolate(stretched_z_spectrum, z_spectrum)
+            # now apply the function generated to upsampled x
+            spres_zproj_interp[batch_idx] = f(np.arange(lores_xproj.shape[2]))
+
+        # raise all negative values to zero
+        # spres_zproj_interp[spres_zproj_interp < 0] = 0
+        # turn interpolated data back into a tensor, put on the gpu
+        return torch.from_numpy(spres_zproj_interp).to(device)
+
+
+def over_interpolate_method(lores_xproj, spres_zproj, upsample_by=None):
+    """
+    Uses monotonic cubic interpolation
+    to raise the sampling rate of spres_zproj to one in great excess to that of lores_xproj
+    then downsamples it back down to the sampling rate of lores_xproj
+
+    Args:
+        lores_xproj (numpy array of dims [batch, 1, measurements])
+        contains measurements of power spectrum from 3D image as measured down the x-dimension
+        spres_zproj (numpy array of dims [batch, 1, measurements])
+        contains measurements of power spectrum from 3D image as measured down the z-dimension
+        upsample_by = integer
+        what rate to raise spres_zproj to (as an overshoot of that of lores_xproj) - defaults to 10, i.e 10 * lores_xproj.shape[2]
+    """
+
+    # default upsampling rate to 10 * lores_xproj.shape[2]
+    if upsample_by is None:
+        upsample_by = 100
+
+    # to hold interpolated z-spectra
+    spres_zproj_interp = np.zeros(lores_xproj.shape)
+
+    for batch_idx, z_spectrum in enumerate(spres_zproj):
+        # pull out a single z-spectra and turn it into an array on the cpu for processing
+        z_spectrum = np.squeeze(z_spectrum.cpu().detach().numpy())
+        # z spectrum has A elements, xy spectra have B elements, where B > A
+        # so for the spectra to line up, graph z-spectra values from 0 to B, in A steps...
+        z_sampling = np.linspace(0, lores_xproj.shape[2], z_spectrum.shape[0])
+
+        # generate interpolation function for z-samples ('x-values'), and z-spectra ('y-values') and apply to upsampled-x
+        spres_zproj_supersampled = pchip_interpolate(
+            z_sampling,
+            z_spectrum,
+            np.linspace(0, lores_xproj.shape[2], upsample_by * lores_xproj.shape[2])
+        )
+
+        # we need to downsample back to the sampling level of the x-spectrum
+        spres_zproj_interp[batch_idx] = spres_zproj_supersampled[::upsample_by]
+
+    # plt.plot(np.arange(lores_xproj.shape[2]), np.squeeze(lores_xproj[0].cpu().detach().numpy()))
+    # plt.plot(np.arange(lores_xproj.shape[2]), np.squeeze(spres_zproj_interp[0]))
+    # plt.show()
+
+    # raise all negative values to zero
+    # spres_zproj_interp[spres_zproj_interp < 0] = 0
+    # turn interpolated data back into a tensor, put back on the gpu
+    return torch.from_numpy(spres_zproj_interp).to(device)
 
 
 def fourier_loss(x_proj, y_proj, z_proj):

@@ -508,6 +508,18 @@ def over_interpolate_method(lores_xproj, spres_zproj, upsample_by=None):
 
 def fourier_loss(x_proj, y_proj, z_proj):
 
+    """
+    Turns the filtered fourier power spectra of each dimension of a 3D image into a loss,
+    defined as the mean difference between the z-spectrum and the x-and-y-spectra
+
+    Args:
+        x_proj (torch tensor of dims (batch, 1, length of spectrum)): A single batch of power spectra generated from the x-projection
+        y_proj (torch tensor of dims (batch, 1, length of spectrum)): A single batch of power spectra generated from the y-projection
+        z_proj (torch tensor of dims (batch, 1, length of spectrum)): A single batch of power spectra generated from the z-projection
+
+    Returns:
+        freq_domain_loss, the mean deviation of the z-spectrum from the x-and-y-spectra (calcualted as a simple difference)
+    """
     batch_size = torch.tensor(x_proj.size(0)).item()
 
     # this is the x and y projections (in a single tensor)

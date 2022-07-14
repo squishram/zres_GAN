@@ -3,7 +3,7 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from skimage import io
 from scipy.interpolate import pchip_interpolate
@@ -474,7 +474,7 @@ def over_interpolate_method(lores_xproj, spres_zproj, upsample_by=None):
 
     # default upsampling rate to 10 * lores_xproj.shape[2]
     if upsample_by is None:
-        upsample_by = 100
+        upsample_by = 10
 
     # to hold interpolated z-spectra
     spres_zproj_interp = np.zeros(lores_xproj.shape)

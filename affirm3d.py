@@ -34,7 +34,10 @@ from affirm3d_funcs import (
 )
 from torch.utils.data import DataLoader
 from tifffile import imwrite
+from time import perf_counter
 
+
+start_time = perf_counter()
 
 ###########
 # STORAGE #
@@ -490,5 +493,11 @@ for i in range(fourier_list.shape[1]):
 # save the network parameters
 torch.save(gen.state_dict(), os.path.join(path_models))
 torch.save(dis.state_dict(), os.path.join(path_models))
+
+end_time = perf_counter()
+
+print(f"Training took {start_time - end_time} seconds")
+print(f"Training took {(start_time - end_time) / 60} minutes")
+print(f"Training took {(start_time - end_time) / 3600} hours")
 
 print("Done!")

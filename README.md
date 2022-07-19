@@ -34,8 +34,7 @@
   - [x] offset pixel base values in image by a set value to get rid of this - try an increase of +100 to pixel values
   - [x] try a monotonic cubic interpolator because cubic spline ones tend to overshoot and get negative values
   - [x] monotonic cubic interpolators seem to miss the, ah, finer details of the spectrum - maybe try OVER-sampling it, and then downsampling it back down to the level of the others?
-  - [ ] this doesn't seem to make any major difference - perhaps it's because the loss is calculated from $mean(x-spectrum, y-spectrum)$ - maybe the loss should be calculated from them separately?
-  - [ ] would it be worth upsampling ALL the spectra? would this give the loss a finer attention to detail?
+  - [ ] upsampling the power spectra is a dead-end - instead, we should be upsampling the z-axis of the data itself, since in many real experimental cases it will be sub-Nyquist
   - [ ] pass some of my data through it and see what happens
 
 ### 2: getting some appropriate data

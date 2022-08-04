@@ -1,0 +1,11 @@
+__pycache__
+images/
+guides/
+old-obsolete_code/
+tutorials/
+
+venv_zresgan/
+.venv_zresgan/
+
+*.log
+*.swp

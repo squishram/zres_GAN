@@ -1,0 +1,3 @@
+location of venv
+/home/ishan/.local/share/virtualenvs/zres_GAN-qw4eYICi
+

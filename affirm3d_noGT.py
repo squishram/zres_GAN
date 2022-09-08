@@ -20,6 +20,7 @@ Loss for discriminator training:
     2. discriminator negative loss - calculated from the ability of the network to recognise that small cross-sectional volumes of I do not belong to O
 """
 
+import logging
 import os
 from pathlib import Path
 from datetime import date
@@ -45,6 +46,25 @@ from tifffile import imwrite
 from time import perf_counter
 
 
+##################
+# logging config #
+##################
+
+logging.basicConfig(
+    filename="runs.log",
+    level=logging.INFO,
+    format="%(asctime)s:%(levelname)s:%(message)s",
+)
+
+###################
+# timer and alarm #
+###################
+
+# how long the sound goes on for, in seconds
+alarm_duration = 1
+# the frequency of the sine wave (i.e. the pitch)
+alarm_freq = 440
+# start a timer!
 start_time = perf_counter()
 
 ###########
@@ -52,16 +72,20 @@ start_time = perf_counter()
 ###########
 
 # path to data
-path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules/noGT/"))
-# glob of filnames
-filename = "mtubs_sim_noGT_*.tif"
+path_data = os.path.join(
+    os.getcwd(), Path("images/sims/microtubules/noGT_LD_zres5xWorse")
+)
+# glob of filenames
+filename = "mtubs_sim_*.tif"
 
 # path to generated images - will make directory if there isn't one already
 # get the date
 today = str(date.today())
 # remove dashes
 today = today.replace("-", "")
-path_gens = os.path.join(os.getcwd(), Path("images/sims/microtubules/generated/"), today)
+path_gens = os.path.join(
+    os.getcwd(), Path("images/sims/microtubules/generated/"), today
+)
 os.makedirs(path_gens, exist_ok=True)
 
 # path to saved networks (for retrieval/ testing)
@@ -81,13 +105,13 @@ learning_rate = 1e-3
 # combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
 freq_domain_loss_scaler = 1
-space_domain_loss_scaler = 1
+space_domain_loss_scaler = 100000
 adversary_gen_loss_scaler = 1
 # for the discriminator:
 loss_dis_real_scaler = 1
 loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
-batch_size = 5
+batch_size = 4
 # number of epochs i.e. number of times you re-use the same training images
 n_epochs = 10
 # after how many backpropagations do you generate a new image?
@@ -110,7 +134,7 @@ zres_hi = 24.0
 # z-resolution in the anisotropic case
 zres_lo = 60.0
 # windowing function: can be hann, hamming, bharris
-window = "hamming"
+window = None
 
 ##########################
 # DATASET AND DATALOADER #
@@ -156,14 +180,12 @@ dis.train()
 criterion_bce = nn.BCELoss()
 # mean squared error loss
 criterion_l1 = nn.L1Loss()
-# fourier-transformed projection loss
-# criterion_ftp = FourierProjectionLoss()
 # Adam optimiser is supposed to be 'the shit for GANs'
 opt_gen = optim.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
 ##############
-# TEST IMAGE #
+# test image #
 ##############
 
 # iterable from the dataloader
@@ -171,13 +193,13 @@ data_iterator = iter(dataloader)
 # pull out a single batch of data
 data_batch = next(data_iterator).to(device)
 # from the batch, pull out a single imag
-img_sample = data_batch[0, 0, :, :, :].cpu().numpy()
+input_sample = data_batch[0, 0, :, :, :]
 # how big are these images?
-size_img = img_sample.shape
+size_img = list(input_sample.shape)
 
-# save the inputs (hires & lores) that make the generated image so we can compare fairly
-img_name = "input_img.tif"
-imwrite(os.path.join(path_gens, img_name), img_sample)
+# save the input that makes the generated image so we can compare fairly
+sample_img_name = "input_img.tif"
+imwrite(os.path.join(path_gens, sample_img_name), input_sample.cpu().numpy())
 
 
 ##################
@@ -190,14 +212,17 @@ step = 0
 loss_list = [[] for _ in range(8)]
 # this list contains the fourier spectra (to be plotted)
 fourier_list = [[] for _ in range(3)]
+# this will simply graph the difference between the input and output sample images (sum(pixdiff))
+input_output_sample_loss = []
 
 for epoch in range(n_epochs):
 
     for batch_idx, data in enumerate(dataloader):
 
-        # pull out the input image batch (I)
+        # pull out the input image batch (I) and put on the GPU
         input_batch = data.to(device=device, dtype=torch.float)
-        # upsample the input image batch (U)
+
+        # upsample the input image batch (U) to ensure equal sampling along each axis
         upsampled_batch = tf.interpolate(
             input_batch,
             size=(input_batch.shape[-1], input_batch.shape[-1], input_batch.shape[-1]),
@@ -206,11 +231,12 @@ for epoch in range(n_epochs):
             # recompute_scale_factor=None,
             # antialias=False,
         )
-        # pass U through the generator to get a generated image batch (G)
+
+        # pass U through the generator to get a generated image batch (G) which (after training) must have isometric resolution
         gen_batch = gen(upsampled_batch)
-        # pass G though the covolutional layer to get the output image batch (O) which should look the same as I
+        # pass G though the downsampling covolutional layer to get the output image batch (O) which should look the same as I
         output_batch = conv_1D_z_axis(
-            upsampled_batch, gaussian_kernel(sig_extra, 6.0), stride_downsampler
+            gen_batch, gaussian_kernel(sig_extra, 6.0), stride_downsampler
         )
 
         ######################
@@ -262,6 +288,7 @@ for epoch in range(n_epochs):
         """
 
         # space domain loss is simply I - O
+        # space_domain_loss = criterion_l1(output_batch, input_batch)
         space_domain_loss = criterion_l1(output_batch, input_batch)
 
         ###################################
@@ -275,15 +302,16 @@ for epoch in range(n_epochs):
 
         # fourier transform, projection, window, hipass filter
         # ... for x dimension of original image
-        input_xpojection = projector(input_batch, 0)
+        input_xprojection = projector(input_batch, 0)
         # ... for y dimension of original image
         input_yprojection = projector(input_batch, 1)
         # ... for z dimension of generated image
         output_zprojection = projector(gen_batch, 2)
+        # output_zprojection = projector(output_batch, 2)
 
         # calculate the power spectral loss ('fourier loss') from the projections
         freq_domain_loss = fourier_loss(
-            input_xpojection, input_yprojection, output_zprojection
+            input_xprojection, input_yprojection, output_zprojection
         )
         # freq_domain_loss = 0
 
@@ -295,12 +323,12 @@ for epoch in range(n_epochs):
         ####################################
 
         # scale the loss appropriately
-        # adversary_gen_loss *= adversary_gen_loss_scaler
+        adversary_gen_loss *= adversary_gen_loss_scaler
         space_domain_loss *= space_domain_loss_scaler
         freq_domain_loss *= freq_domain_loss_scaler
         # total loss
-        loss_gen = space_domain_loss + freq_domain_loss
-        # loss_gen = space_domain_loss + freq_domain_loss + adversary_gen_loss
+        # loss_gen = space_domain_loss + freq_domain_loss
+        loss_gen = space_domain_loss + freq_domain_loss + adversary_gen_loss
 
         # the zero grad thingy is come
         opt_gen.zero_grad()
@@ -317,37 +345,73 @@ for epoch in range(n_epochs):
             # generator loss: signal domain
             loss_list[2].append(float(space_domain_loss))
             # generator loss: adversarial
-            # loss_list[3].append(float(adversary_gen_loss))
+            loss_list[3].append(float(adversary_gen_loss))
             # generator loss: total
             loss_list[4].append(float(loss_gen))
             # discriminator loss: detecting real isomorphic images
-            # loss_list[5].append(float(loss_dis_real))
+            loss_list[5].append(float(loss_dis_real))
             # discriminator loss: detecting fake (generated) isomorphic images
-            # loss_list[6].append(float(loss_dis_fake))
+            loss_list[6].append(float(loss_dis_fake))
             # discriminator loss: total
-            # loss_list[7].append(float(loss_dis))
+            loss_list[7].append(float(loss_dis))
 
         # count the number of backpropagations
         step += 1
 
     # using the 'with' method in conjunction with no_grad() simply
     # disables grad calculations for the duration of the statement
-    # Thus, we can use it to generate a sample set of images without initiating
-    # a backpropagation calculation
+    # Thus, we can use it to generate a sample set of images without contributing to a backpropagation calculation
     with torch.no_grad():
-        # pass low-z-res batch through the generator
-        gen_sample = gen(input_batch)
-        # pull out a single image
-        gen_sample = gen_sample[0, 0, :, :, :].cpu().numpy()
-        # name your image grid according to which training iteration it came from
+
+        ###############################################################
+        # calculating the difference between input and output samples #
+        ###############################################################
+
+        # upsample the input image sample
+        upsampled_sample_img = tf.interpolate(
+            input_sample.unsqueeze(0).unsqueeze(0),
+            size=(
+                input_sample.shape[-1],
+                input_sample.shape[-1],
+                input_sample.shape[-1],
+            ),
+            mode="trilinear",
+            # align_corners=True,
+            # recompute_scale_factor=None,
+            # antialias=False,
+        )
+        # pass upsampled image through the generator
+        generated_sample_img = gen(upsampled_sample_img)
+        # downsample the generated image - it should look the same as the input!
+        output_sample = conv_1D_z_axis(
+            generated_sample_img, gaussian_kernel(sig_extra, 6.0), stride_downsampler
+        )
+
+        # calculate the total difference between the input and output images (which should be identical)
+        # save to a list to be graphed against epochs
+        input_output_sample_diff = torch.sum(output_sample - input_sample)
+        input_output_sample_diff = input_output_sample_diff.item()
+        input_output_sample_loss.append(input_output_sample_diff)
+
+        #######################################
+        # saving sample images for inspection #
+        #######################################
+
+        # name your image according to how many training epochs the generator has undergone
         gen_sample_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
         print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {gen_sample_name}")
-        # save the sample image
-        imwrite(os.path.join(path_gens, gen_sample_name), gen_sample)
+        # pass upsampled low-z-res sample image through the generator
+        sample_img = gen(input_sample.unsqueeze(0).unsqueeze(0))
+        # gen_sample_tosave = torch.squeeze(gen_sample).cpu().numpy()
+        # save the sample super-res image
+        imwrite(
+            os.path.join(path_gens, gen_sample_name),
+            torch.squeeze(sample_img).cpu().numpy(),
+        )
 
     # get fourier power spectra...
     # for the x projection
-    fourier_list[0].append(input_xpojection[0, 0].cpu().detach().numpy())
+    fourier_list[0].append(input_xprojection[0, 0].cpu().detach().numpy())
     # for the y projection
     fourier_list[1].append(input_yprojection[0, 0].cpu().detach().numpy())
     # for the z projection
@@ -358,13 +422,13 @@ for epoch in range(n_epochs):
 
     # print the loss after each epoch
     print(f"backpropagation count: {step}")
-    print(f"Weighted Spatial Loss: {space_domain_loss.item()}")
-    print(f"Weighted Fourier Loss: {freq_domain_loss}")
-    # print(f"Weighted 'GAN'-y Loss: {adversary_gen_loss.cpu().detach().numpy()}")
-    print(f"Generator Total  Loss: {loss_gen.cpu().detach().numpy()}")
-    # print(f"Discriminator fk Loss: {loss_dis_fake}")
-    # print(f"Discriminator rl Loss: {loss_dis_real}")
-    # print(f"Discriminator tt Loss: {loss_dis}")
+    print(f"Generator     Spatial Loss: {space_domain_loss.item()}")
+    print(f"Generator     Fourier Loss: {freq_domain_loss}")
+    print(f"Generator Adversarial Loss: {adversary_gen_loss.cpu().detach().numpy()}")
+    print(f"Generator       Total Loss: {loss_gen.cpu().detach().numpy()}")
+    print(f"Discriminator    Fake Loss: {loss_dis_fake}")
+    print(f"Discriminator    Real Loss: {loss_dis_real}")
+    print(f"Discriminator   Total Loss: {loss_dis}")
 
 
 ############
@@ -392,15 +456,18 @@ with open(metadata, "a") as file:
             "\nadversary_gen_loss_scaler= " + str(adversary_gen_loss_scaler),
             "\nloss_dis_real_scaler= " + str(loss_dis_real_scaler),
             "\nloss_dis_fake_scaler = " + str(loss_dis_fake_scaler),
+            "\nwindowing function = " + str(window),
         ]
     )
-# TODO make sure to add more about the network structures!
+
+n_figures = 0
 
 ###########################
 # PLOT THE GENERATOR LOSS #
 ###########################
 
-plt.figure(0)
+plt.figure(n_figures)
+n_figures += 1
 # plot out all the losses:
 for i in range(1, 5):
     plt.plot(loss_list[0], loss_list[i])
@@ -424,7 +491,8 @@ plt.savefig(os.path.join(path_gens, "generator losses"), format="pdf")
 # PLOT THE DISCRIMINATOR LOSS #
 ###############################
 
-plt.figure(1)
+plt.figure(n_figures)
+n_figures += 1
 # plot out all the losses:
 for i in range(5, len(loss_list)):
     # plt.plot(loss_list[0], loss_list[i])
@@ -454,7 +522,8 @@ mean_fourier_spectra = np.mean(fourier_list, axis=1)
 error_bars = np.std(fourier_list, axis=1)
 
 for i in range(fourier_list.shape[1]):
-    plt.figure(i + 2)
+    plt.figure(n_figures)
+    n_figures += 1
     for j in range(fourier_list.shape[0]):
         plt.plot(range(fourier_list.shape[2]), fourier_list[j, i])
 
@@ -475,14 +544,25 @@ for i in range(fourier_list.shape[1]):
     )
 
 
+##########################################################################
+# plot the sum of pixel differences between input and output sample images
+##########################################################################
+plt.figure(n_figures)
+plt.plot(range(len(input_output_sample_loss)), input_output_sample_loss)
+plt.xlabel("sample epoch (#)")
+plt.ylabel("sum of pixel differences (AU)")
+plt.savefig(os.path.join(path_gens, "sample_loss"), format="pdf")
+
 # save the network parameters
 torch.save(gen.state_dict(), os.path.join(path_models))
-# torch.save(dis.state_dict(), os.path.join(path_models))
+torch.save(dis.state_dict(), os.path.join(path_models))
 
 end_time = perf_counter()
 
-print(f"Training took {start_time - end_time} seconds")
-print(f"Training took {(start_time - end_time) / 60} minutes")
-print(f"Training took {(start_time - end_time) / 3600} hours")
-
+print(f"Training took {(end_time - start_time)} seconds")
+print(f"Training took {(end_time - start_time) / 60} minutes")
+print(f"Training took {(end_time - start_time) / 3600} hours")
 print("Done!")
+
+# play an alarm to signal the code has finished running!
+os.system("play -nq -t alsa synth {} sine {}".format(alarm_duration, alarm_freq))

@@ -333,7 +333,7 @@ class Generator(nn.Module):
 
 class Discriminator(nn.Module):
     """
-    Convolutional Generational Network Class
+    Convolutional Discriminator Network Class
     Takes in 3D images and outputs a number between 1 and 0
 
     fields:
@@ -379,6 +379,75 @@ class Discriminator(nn.Module):
         #     # 1*1*1
         #     nn.Sigmoid(),
         # )
+
+        self.disc = nn.Sequential(
+            # 32*96*96
+            nn.Conv3d(
+                1,
+                n_features * 8,
+                kernel_size=(3, 3, 3),
+                stride=(1, 2, 2),
+                padding=(1, 1, 1),
+            ),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 16*48*48
+            self.nn_block(n_features * 8, n_features * 4, 3, 2, 1),
+            # 16*24*24
+            self.nn_block(n_features * 4, n_features * 2, 3, 1, 1),
+            # 16*24*24
+            self.nn_block(
+                n_features * 2, n_features * 1, (3, 3, 3), (1, 3, 3), (1, 1, 1)
+            ),
+            # 8*8*8
+            nn.MaxPool3d(kernel_size=2, stride=2, padding=0),
+            # 4*4*4
+            nn.Conv3d(n_features * 1, 1, kernel_size=4, stride=1, padding=0),
+            # 1*1*1
+            nn.Sigmoid(),
+        )
+
+    def nn_block(self, in_channels, out_channels, kernel_size, stride, padding):
+        return nn.Sequential(
+            nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride,
+                padding,
+                bias=False,
+            ),
+            nn.BatchNorm3d(out_channels),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+    def forward(self, x):
+        return self.disc(x)
+
+
+class PatchDiscriminator(nn.Module):
+    """
+    Convolutional Discriminator Network Class
+    Takes in 3D images and outputs a set of numbers between 1 and 0
+    The loss is then calculated from the average of those numbers
+
+    fields:
+    n_features, channel depth after convolution
+    kernel_size (int), side length of cubic kernel
+    padding (int), count of padding blocks
+    """
+
+    def __init__(self, n_features):
+        """
+        formula for calculating dimensions after convolution
+        output = 1 + (input + 2*padding - kernel) / stride
+        for image size 96*96*96
+        45 = 1 + (96 - 6) / 2
+        9  = 1 + (45 - 5) / 3
+        3  = 1 + (9 - 3) / 3
+        1  = 1 + (3 - 3) / 3
+        """
+
+        super(Discriminator, self).__init__()
 
         self.disc = nn.Sequential(
             # 32*96*96

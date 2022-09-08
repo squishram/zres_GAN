@@ -263,10 +263,18 @@ time1 = perf_counter()
 today = str(date.today())
 today = today.replace("-", "")
 # path to data
-path_data = os.path.join(os.getcwd(), "images/sims/microtubules/noGT/")
-
+path_data = os.path.join(os.getcwd(), "images/sims/microtubules/noGT_LD/")
 # make directories if they don't already exist so images have somewhere to go
 os.makedirs(path_data, exist_ok=True)
+
+###################
+# finishing alarm #
+###################
+
+# how long the sound goes on for, in seconds
+duration = 1
+# the frequency of the sine wave (i.e. the pitch)
+freq = 440
 
 ##############
 # file specs #
@@ -286,7 +294,7 @@ img_bit = 16
 #####################
 
 # total length of all fibres:
-t = 5000
+t = 2500
 # size of final image in pixels:
 size_img = np.array([96, 96, 32])
 # step size each iteration (make it <0.5 if you want continuous microtubules):
@@ -313,7 +321,7 @@ size_pix_nm = 10.0
 # x/y-resolution
 xres = 24.0
 # z-resolution
-zres = 60.0
+zres = xres * 5
 # What is the mean sigma (in voxels) and the sigma uncertainty
 # (as a fraction of the mean value)?
 sig_unc = 0.2
@@ -423,8 +431,11 @@ print(f"the mean xy-sigma is {sigma_xy_mean}")
 print(f"the mean z-sigma is {sigma_z_mean}")
 print("Done!")
 print(
-    f"To make {2 * n_imgs} {img_bit}-bit images with {n_chunks[0]} chunks/axis took {time2 - time1} seconds"
+    f"To make {n_imgs} {img_bit}-bit images took {time2 - time1} seconds"
 )
+
+# play an alarm to signal the code has finished running!
+os.system('play -nq -t alsa synth {} sine {}'.format(duration, freq))
 
 ############
 # METADATA #

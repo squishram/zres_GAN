@@ -37,22 +37,23 @@
   - [x] OBSOLETE IDEA upsampling the power spectra is a dead-end - instead, we should be upsampling the z-axis of the data itself, since in many real experimental cases it will be sub-Nyquist
   - [x] OBSOLETE IDEA using scipy to achieve this doesn't work (it's way too slow) because you need to take stuff off the GPU to run it through the numpy backend - instead, we need to use a pytorch-based method
   - [-] OBSOLETE IDEA this has been successfully done with the undersampled data - now we need to make it so the ground truth is better sampled at the point of data generation
-  - [ ] SUSAN MEETING:
+  - [x] SUSAN MEETING:
 
       - [ ] METHOD 1: no pre-training, no ground truth
-      - [ ] METHOD 2: pre-training with ground truth
+      - [-] METHOD 2: pre-training with ground truth
       - [x] do sketches for both!
       - [x] background reading on 'patch-GAN'
 
-    TODO FOR TOMORROW: METHOD 1
+    TODO: METHOD 1
       - [x] make a dataset without the ground truth
-      - [ ] remove the ground truth from the training loop
-      - [ ] implement susan's convolutional thingy
-      - [ ] check that you get increased blur level
-      - [ ] calculate the real space loss between the downsampled generated image and the input
-
+      - [x] remove the ground truth from the training loop
+      - [x] implement susan's convolutional layer to downsample the generated image
+      - [x] check that you get increased blur level
+      - [x] calculate the real space loss between the downsampled generated image and the input
+      - [x] sanity check experiment: make the z-resolution MUCH worse in the input image - maybe 5x worse?
+      - [x] sanity check experiment: drop down the density of the microtubules a little bit
+      - [x] play with the windowing functions
       - [ ] adapt the adversary/discriminator to use 'patch-GAN'
-
 
   - [ ] pass some of my data through it and see what happens
 

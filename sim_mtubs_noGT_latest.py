@@ -280,8 +280,8 @@ freq = 440
 # file specs #
 ##############
 
-# number of images to produce for each resolution:
-n_imgs = 300
+# number of images to produce (for each resolution if making GT as well):
+n_imgs = 1000
 # file name root:
 filename = "mtubs_sim_noGT_"
 # bittage of final image - 8 | 16 | 32 | 64
@@ -404,7 +404,7 @@ for i in range(n_imgs):
     # scale according to the z-projection in order that the  high-and-low-res-images aren't affected differently
     # which should be the same for both
     # z_projection = data.sum(2).sum(1)
-    # TODO - finish this idea! NOTE - will not work for different sampling (as in this code)
+    # TODO: finish this idea! NOTE - will not work for different sampling (as in this code)
 
     # tiff writing in python gets the axes wrong
     # rotate the image before writing so it doesn't!
@@ -451,21 +451,21 @@ with open(metadata, "a") as file:
     file.writelines(
         [
             os.path.basename(__file__),
-            f"\nimage dimensions, voxels: {size_img}\n",
-            f"mean emitter intensity, AU1: {intensity_mean}\n",
-            f"emitter intensity variance, AU1: {int_unc * intensity_mean}\n",
-            f"voxel dimensions, nm: {(size_pix_nm, size_pix_nm, size_pix_nm)}\n",
-            f"xy-resolution, nm: {xres}\n",
-            f"z-resolution, nm: {zres}\n",
-            f"xy-resolution variance, nm: {int_unc * xres}\n",
-            f"z-resolution variance, nm: {int_unc * zres}\n",
-            f"number of chunks: {n_chunks}\n",
-            f"chunk overlap: {chunk_overlap}\n",
-            f"total fibre length: {t}\n",
-            f"mean xy-sigma: {sigma_xy_mean}\n",
-            f"mean  z-sigma: {sigma_z_mean}\n",
-            f"number of images: {n_imgs}\n",
-            f"image bit-depth: {img_bit}\n",
-            f"total time taken, seconds: {time2 - time1}\n",
+            f"\nimage dimensions, voxels: {size_img}",
+            f"\nmean emitter intensity, AU1: {intensity_mean}",
+            f"\nemitter intensity variance, AU1: {int_unc * intensity_mean}",
+            f"\nvoxel dimensions, nm: {(size_pix_nm, size_pix_nm, size_pix_nm)}",
+            f"\nxy-resolution, nm: {xres}",
+            f"\nz-resolution, nm: {zres}",
+            f"\nxy-resolution variance, nm: {int_unc * xres}",
+            f"\nz-resolution variance, nm: {int_unc * zres}",
+            f"\nnumber of chunks: {n_chunks}",
+            f"\nchunk overlap: {chunk_overlap}",
+            f"\ntotal fibre length: {t}",
+            f"\nmean xy-sigma: {sigma_xy_mean}",
+            f"\nmean  z-sigma: {sigma_z_mean}",
+            f"\nnumber of images: {n_imgs}",
+            f"\nimage bit-depth: {img_bit}",
+            f"\ntotal time taken, seconds: {time2 - time1}",
         ]
     )

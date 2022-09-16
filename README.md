@@ -44,17 +44,16 @@
       - [x] do sketches for both!
       - [x] background reading on 'patch-GAN'
 
-    TODO: METHOD 1
-      - [x] make a dataset without the ground truth
-      - [x] remove the ground truth from the training loop
-      - [x] implement susan's convolutional layer to downsample the generated image
-      - [x] check that you get increased blur level
-      - [x] calculate the real space loss between the downsampled generated image and the input
-      - [x] sanity check experiment: make the z-resolution MUCH worse in the input image - maybe 5x worse?
-      - [x] sanity check experiment: drop down the density of the microtubules a little bit
-      - [x] play with the windowing functions
-      - [ ] adapt the adversary/discriminator to use 'patch-GAN'
-
+  - [x] make a dataset without the ground truth
+  - [x] remove the ground truth from the training loop
+  - [x] implement susan's convolutional layer to downsample the generated image
+  - [x] check that you get increased blur level
+  - [x] calculate the real space loss between the downsampled generated image and the input
+  - [x] sanity check experiment: make the z-resolution MUCH worse in the input image - maybe 5x worse?
+  - [x] sanity check experiment: drop down the density of the microtubules a little bit
+  - [x] play with the windowing functions
+  - [ ] adapt the adversary/discriminator to use 'patch-GAN'
+  - [ ] try reducing mitochondrial "movement" in z for the mitochondria simulations
   - [ ] pass some of my data through it and see what happens
 
 ### 2: getting some appropriate data

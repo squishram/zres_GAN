@@ -4,8 +4,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as tf
-
-# import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from skimage import io
 from pathlib import Path
@@ -287,7 +285,7 @@ class Generator(nn.Module):
     padding (int), count of padding blocks
     """
 
-    def __init__(self, n_features, kernel_size=False, padding=False):
+    def __init__(self, n_features, kernel_size=0, padding=0):
         """
         formula for calculating dimensions after convolution
         output = 1 + (input + 2*padding - kernel) / stride
@@ -296,9 +294,9 @@ class Generator(nn.Module):
         # class inheritance
         super(Generator, self).__init__()
 
-        if not kernel_size:
+        if kernel_size == 0:
             kernel_size = 3
-        if not padding:
+        if padding == 0:
             padding = int(kernel_size / 2)
 
         self.gen = nn.Sequential(
@@ -424,7 +422,7 @@ class Discriminator(nn.Module):
         return self.disc(x)
 
 
-class PatchDiscriminator(nn.Module):
+class MarkovianDiscriminator(nn.Module):
     """
     Convolutional Discriminator Network Class
     Takes in 3D images and outputs a set of numbers between 1 and 0
@@ -447,31 +445,25 @@ class PatchDiscriminator(nn.Module):
         1  = 1 + (3 - 3) / 3
         """
 
-        super(Discriminator, self).__init__()
+        super(MarkovianDiscriminator, self).__init__()
 
         self.disc = nn.Sequential(
             # 32*96*96
             nn.Conv3d(
                 1,
                 n_features * 8,
-                kernel_size=(3, 3, 3),
-                stride=(1, 2, 2),
-                padding=(1, 1, 1),
+                kernel_size=3,
+                stride=2,
+                padding=1,
             ),
             nn.LeakyReLU(0.2, inplace=True),
-            # 16*48*48
+            # 8*48*48
             self.nn_block(n_features * 8, n_features * 4, 3, 2, 1),
-            # 16*24*24
+            # 8*24*24
             self.nn_block(n_features * 4, n_features * 2, 3, 1, 1),
-            # 16*24*24
-            self.nn_block(
-                n_features * 2, n_features * 1, (3, 3, 3), (1, 3, 3), (1, 1, 1)
-            ),
+            # 8*24*24
+            self.nn_block(n_features * 2, n_features * 1, 3, 2, 1),
             # 8*8*8
-            nn.MaxPool3d(kernel_size=2, stride=2, padding=0),
-            # 4*4*4
-            nn.Conv3d(n_features * 1, 1, kernel_size=4, stride=1, padding=0),
-            # 1*1*1
             nn.Sigmoid(),
         )
 
@@ -490,7 +482,7 @@ class PatchDiscriminator(nn.Module):
         )
 
     def forward(self, x):
-        return self.disc(x)
+        return torch.mean(self.disc(x))
 
 
 def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:

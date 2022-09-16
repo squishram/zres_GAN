@@ -52,6 +52,11 @@
   - [x] sanity check experiment: make the z-resolution MUCH worse in the input image - maybe 5x worse?
   - [x] sanity check experiment: drop down the density of the microtubules a little bit
   - [x] play with the windowing functions
+  - [x] more L1 loss tends to result in blurriness - maybe bump up the 'GAN'-loss and see what that does?
+  - [x] L1*10000, GAN*1000, Fourier*1 = best so far
+  - [ ] try more epochs - then try making a larger dataset
+  - [ ] try random adding vertical/ horizontal/ axial flips/ rotations to the dataset on each epoch to avoid biasing without having to use enormous datasets
+  - [ ] do PROPER normalisation - get the mean and stdev values of the image and use those to normalise the image before training! - is this okay for microscopy images where intensity needs to be preserved?
   - [ ] adapt the adversary/discriminator to use 'patch-GAN'
   - [ ] try reducing mitochondrial "movement" in z for the mitochondria simulations
   - [ ] pass some of my data through it and see what happens

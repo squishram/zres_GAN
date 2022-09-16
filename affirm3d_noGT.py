@@ -36,6 +36,7 @@ from affirm3d_noGT_functions import (
     Custom_Dataset,
     Generator,
     Discriminator,
+    MarkovianDiscriminator,
     gaussian_kernel,
     conv_1D_z_axis,
     fourier_loss,
@@ -63,7 +64,7 @@ logging.basicConfig(
 # how long the sound goes on for, in seconds
 alarm_duration = 1
 # the frequency of the sine wave (i.e. the pitch)
-alarm_freq = 440
+alarm_freq = 340
 # start a timer!
 start_time = perf_counter()
 
@@ -104,16 +105,16 @@ learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
 # combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
-freq_domain_loss_scaler = 1
-space_domain_loss_scaler = 100000
+freq_domain_loss_scaler = 0.0001
+space_domain_loss_scaler = 0.1
 adversary_gen_loss_scaler = 1
 # for the discriminator:
-loss_dis_real_scaler = 1
-loss_dis_fake_scaler = 1
+loss_dis_real_scaler = 0.01
+loss_dis_fake_scaler = 0.01
 # batch size, i.e. #forward passes per backpropagation
-batch_size = 4
+batch_size = 5
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 10
+n_epochs = 30
 # after how many backpropagations do you generate a new image?
 save_increment = 50
 # channel depth of generator hidden layers in integers of this number
@@ -134,7 +135,9 @@ zres_hi = 24.0
 # z-resolution in the anisotropic case
 zres_lo = 60.0
 # windowing function: can be hann, hamming, bharris
-window = None
+window = "bharris"
+# type of discriminator: can be patchgan or normal
+type_disc = "patchgan"
 
 ##########################
 # DATASET AND DATALOADER #
@@ -171,7 +174,12 @@ initialise_weights(gen)
 gen.train()
 
 # Discriminator Setup
-dis = Discriminator(features_dis).to(device)
+if type_disc == "patchgan":
+    dis = MarkovianDiscriminator(features_dis).to(device)
+elif type_disc == "normal":
+    dis = Discriminator(features_dis).to(device)
+else:
+    dis = Discriminator(features_dis).to(device)
 initialise_weights(dis)
 dis.train()
 
@@ -256,10 +264,12 @@ for epoch in range(n_epochs):
         # "how well did the discriminator discern the generator's fakes"-loss
         loss_dis_fake = criterion_bce(dis_fake, torch.zeros_like(dis_fake))
 
+        # apply scalers to the discriminator loss
+        loss_dis_fake *= loss_dis_fake_scaler
+        loss_dis_real *= loss_dis_real_scaler
         # add the two components of the Discriminator loss
-        loss_dis = (loss_dis_real * loss_dis_real_scaler) + (
-            loss_dis_fake * loss_dis_fake_scaler
-        )
+        loss_dis = loss_dis_fake + loss_dis_real
+
         # do the zero grad thing
         opt_dis.zero_grad()
         # backpropagation to get the gradient
@@ -446,28 +456,30 @@ with open(metadata, "a") as file:
     file.writelines(
         [
             os.path.basename(__file__),
-            "\nlearning_rate = " + str(learning_rate),
-            "\nsize_batch = " + str(batch_size),
-            "\nsize_img = " + str(size_img),
-            "\nn_epochs = " + str(n_epochs),
-            "\nfeatures_gen= " + str(features_gen),
-            "\nfreq_domain_loss_scaler= " + str(freq_domain_loss_scaler),
-            "\nspace_domain_loss_scaler= " + str(space_domain_loss_scaler),
-            "\nadversary_gen_loss_scaler= " + str(adversary_gen_loss_scaler),
-            "\nloss_dis_real_scaler= " + str(loss_dis_real_scaler),
-            "\nloss_dis_fake_scaler = " + str(loss_dis_fake_scaler),
-            "\nwindowing function = " + str(window),
+            f"\nlearning_rate = {learning_rate}",
+            f"\nsize_batch = {batch_size}",
+            f"\nsize_img = {size_img}",
+            f"\nn_epochs = {n_epochs}",
+            f"\nfeatures_gen= {features_gen}",
+            f"\nfreq_domain_loss_scaler= {freq_domain_loss_scaler}",
+            f"\nspace_domain_loss_scaler= {space_domain_loss_scaler}",
+            f"\nadversary_gen_loss_scaler= {adversary_gen_loss_scaler}",
+            f"\nloss_dis_real_scaler= {loss_dis_real_scaler}",
+            f"\nloss_dis_fake_scaler = {loss_dis_fake_scaler}",
+            f"\nwindowing function = {window}",
+            f"\ndiscriminator type = {type_disc}",
         ]
     )
 
-n_figures = 0
+# n_figures = 0
 
 ###########################
 # PLOT THE GENERATOR LOSS #
 ###########################
 
-plt.figure(n_figures)
-n_figures += 1
+# plt.figure(n_figures)
+# n_figures += 1
+plt.figure()
 # plot out all the losses:
 for i in range(1, 5):
     plt.plot(loss_list[0], loss_list[i])
@@ -485,14 +497,16 @@ plt.legend(
 )
 
 print("Saving generator loss graph...")
-plt.savefig(os.path.join(path_gens, "generator losses"), format="pdf")
+plt.savefig(os.path.join(path_gens, "loss_generator"), format="pdf")
+plt.close()
 
 ###############################
 # PLOT THE DISCRIMINATOR LOSS #
 ###############################
 
-plt.figure(n_figures)
-n_figures += 1
+# plt.figure(n_figures)
+# n_figures += 1
+plt.figure()
 # plot out all the losses:
 for i in range(5, len(loss_list)):
     # plt.plot(loss_list[0], loss_list[i])
@@ -510,7 +524,8 @@ plt.legend(
 )
 
 print("Saving discriminator loss graph...")
-plt.savefig(os.path.join(path_gens, "discriminator losses"), format="pdf")
+plt.savefig(os.path.join(path_gens, "loss_discriminator"), format="pdf")
+plt.close()
 
 ###########################################
 # PLOT THE PROFILE OF THE FOURIER SPECTRA #
@@ -522,8 +537,9 @@ mean_fourier_spectra = np.mean(fourier_list, axis=1)
 error_bars = np.std(fourier_list, axis=1)
 
 for i in range(fourier_list.shape[1]):
-    plt.figure(n_figures)
-    n_figures += 1
+    # plt.figure(n_figures)
+    # n_figures += 1
+    plt.figure()
     for j in range(fourier_list.shape[0]):
         plt.plot(range(fourier_list.shape[2]), fourier_list[j, i])
 
@@ -539,19 +555,23 @@ for i in range(fourier_list.shape[1]):
     )
 
     plt.savefig(
-        os.path.join(path_gens, f"fourier_projections_{i}"),
+        os.path.join(path_gens, f"fourier_projections_{i + 1}"),
         format="pdf",
     )
+    plt.close()
 
 
 ##########################################################################
 # plot the sum of pixel differences between input and output sample images
 ##########################################################################
-plt.figure(n_figures)
+# plt.figure(n_figures)
+plt.figure()
+
 plt.plot(range(len(input_output_sample_loss)), input_output_sample_loss)
 plt.xlabel("sample epoch (#)")
 plt.ylabel("sum of pixel differences (AU)")
-plt.savefig(os.path.join(path_gens, "sample_loss"), format="pdf")
+plt.savefig(os.path.join(path_gens, "loss_sample_img"), format="pdf")
+plt.close()
 
 # save the network parameters
 torch.save(gen.state_dict(), os.path.join(path_models))
@@ -564,5 +584,5 @@ print(f"Training took {(end_time - start_time) / 60} minutes")
 print(f"Training took {(end_time - start_time) / 3600} hours")
 print("Done!")
 
-# play an alarm to signal the code has finished running!
+# play an alarm to signal the code has finished running
 os.system("play -nq -t alsa synth {} sine {}".format(alarm_duration, alarm_freq))

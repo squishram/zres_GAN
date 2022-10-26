@@ -1,4 +1,12 @@
 """
+ToDo
+- [ ] save the actual generated image not just the output one
+- [x] try with only L1 loss
+- [x] try with a little bit of adversarial loss
+- [ ] try getting rid of batchnorm??
+- [ ] try residual learning - add U to G before doing everything else
+- [ ] try Lanczos upsampling (in opencv) instead of trilinear upsampling
+
 pseudo-code for new affirm3d, which does not use the ground truth to calculate the real-space loss:
 
 Generated image flow:
@@ -16,8 +24,8 @@ Loss for generator training:
     3. adversarial loss - calculated from the ability of the generator to ensure that small cross-sectional volumes of O are mistaken by the discriminator for small cross-sectional volumes of I
 
 Loss for discriminator training:
-    1. discriminator positive loss - calculated from the ability of the network to recognise that small cross-sectional volumes of O do not belong to I
-    2. discriminator negative loss - calculated from the ability of the network to recognise that small cross-sectional volumes of I do not belong to O
+    1. discriminator positive loss - calculated from the ability of the network to recognise that cross-sectional volumes of O do not belong to I
+    2. discriminator negative loss - calculated from the ability of the network to recognise that cross-sectional volumes of I do not belong to O
 """
 
 import logging
@@ -87,6 +95,7 @@ today = today.replace("-", "")
 path_gens = os.path.join(
     os.getcwd(), Path("images/sims/microtubules/generated/"), today
 )
+# path_gens = Path(f"{os.getcwd()}images/sims/microtubules/generated/{today}")
 os.makedirs(path_gens, exist_ok=True)
 
 # path to saved networks (for retrieval/ testing)
@@ -105,16 +114,16 @@ learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
 # combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
-freq_domain_loss_scaler = 0.0001
-space_domain_loss_scaler = 0.1
-adversary_gen_loss_scaler = 1
+freq_domain_loss_scaler = 0
+space_domain_loss_scaler = 100
+adversary_gen_loss_scaler = 0.1
 # for the discriminator:
-loss_dis_real_scaler = 0.01
-loss_dis_fake_scaler = 0.01
+loss_dis_real_scaler = 0.1
+loss_dis_fake_scaler = 0.1
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
 # number of epochs i.e. number of times you re-use the same training images
-n_epochs = 30
+n_epochs = 10
 # after how many backpropagations do you generate a new image?
 save_increment = 50
 # channel depth of generator hidden layers in integers of this number
@@ -178,6 +187,7 @@ if type_disc == "patchgan":
     dis = MarkovianDiscriminator(features_dis).to(device)
 elif type_disc == "normal":
     dis = Discriminator(features_dis).to(device)
+# adding this "else" to make sure I don't get "dis is possibly unbound" LSP diagnostic errors
 else:
     dis = Discriminator(features_dis).to(device)
 initialise_weights(dis)
@@ -225,12 +235,13 @@ input_output_sample_loss = []
 
 for epoch in range(n_epochs):
 
-    for batch_idx, data in enumerate(dataloader):
+    for data in dataloader:
 
         # pull out the input image batch (I) and put on the GPU
         input_batch = data.to(device=device, dtype=torch.float)
 
-        # upsample the input image batch (U) to ensure equal sampling along each axis
+        # upsample input image batch in z to get (U)
+        # must look the same as I, but with upsampled z!
         upsampled_batch = tf.interpolate(
             input_batch,
             size=(input_batch.shape[-1], input_batch.shape[-1], input_batch.shape[-1]),
@@ -240,11 +251,16 @@ for epoch in range(n_epochs):
             # antialias=False,
         )
 
-        # pass U through the generator to get a generated image batch (G) which (after training) must have isometric resolution
+        # pass U through the generator to get a generated image batch (G)
+        # after training, should have isometric resolution!
         gen_batch = gen(upsampled_batch)
-        # pass G though the downsampling covolutional layer to get the output image batch (O) which should look the same as I
+
+        # pass G though the downsampling covolutional layer to get the output image batch (O)
+        # it should look the same as I!
         output_batch = conv_1D_z_axis(
-            gen_batch, gaussian_kernel(sig_extra, 6.0), stride_downsampler
+            gen_batch,
+            gaussian_kernel(sig_extra, 6.0),
+            stride_downsampler,
         )
 
         ######################
@@ -254,14 +270,14 @@ for epoch in range(n_epochs):
         how good is the discriminator at recognising real and fake images?
         """
 
-        # pass the I through the discriminator i.e. calculate D(I)
+        # pass the input image through the discriminator i.e. calculate D(I)
         dis_real = dis(input_batch).reshape(-1)
-        # how badly was it fooled?
+        # how bad is it at recognising they are real?
         loss_dis_real = criterion_bce(dis_real, torch.ones_like(dis_real))
 
-        # pass the generated image through the discriminator, D(O)
+        # pass the output image through the discriminator, D(O)
         dis_fake = dis(output_batch.detach()).reshape(-1)
-        # "how well did the discriminator discern the generator's fakes"-loss
+        # how badly was it fooled?
         loss_dis_fake = criterion_bce(dis_fake, torch.zeros_like(dis_fake))
 
         # apply scalers to the discriminator loss
@@ -321,9 +337,10 @@ for epoch in range(n_epochs):
 
         # calculate the power spectral loss ('fourier loss') from the projections
         freq_domain_loss = fourier_loss(
-            input_xprojection, input_yprojection, output_zprojection
+            input_xprojection,
+            input_yprojection,
+            output_zprojection,
         )
-        # freq_domain_loss = 0
 
         # add the x and y components of the frequency domain loss
         freq_domain_loss = sum(freq_domain_loss)
@@ -368,17 +385,17 @@ for epoch in range(n_epochs):
         # count the number of backpropagations
         step += 1
 
+    #######################################
+    # saving sample images for inspection #
+    #######################################
+
     # using the 'with' method in conjunction with no_grad() simply
     # disables grad calculations for the duration of the statement
     # Thus, we can use it to generate a sample set of images without contributing to a backpropagation calculation
     with torch.no_grad():
 
-        ###############################################################
-        # calculating the difference between input and output samples #
-        ###############################################################
-
         # upsample the input image sample
-        upsampled_sample_img = tf.interpolate(
+        upsampled_sample = tf.interpolate(
             input_sample.unsqueeze(0).unsqueeze(0),
             size=(
                 input_sample.shape[-1],
@@ -390,34 +407,43 @@ for epoch in range(n_epochs):
             # recompute_scale_factor=None,
             # antialias=False,
         )
+
         # pass upsampled image through the generator
-        generated_sample_img = gen(upsampled_sample_img)
+        generated_sample = gen(upsampled_sample)
+
         # downsample the generated image - it should look the same as the input!
         output_sample = conv_1D_z_axis(
-            generated_sample_img, gaussian_kernel(sig_extra, 6.0), stride_downsampler
+            generated_sample, gaussian_kernel(sig_extra, 6.0), stride_downsampler
         )
-
-        # calculate the total difference between the input and output images (which should be identical)
-        # save to a list to be graphed against epochs
-        input_output_sample_diff = torch.sum(output_sample - input_sample)
-        input_output_sample_diff = input_output_sample_diff.item()
-        input_output_sample_loss.append(input_output_sample_diff)
-
-        #######################################
-        # saving sample images for inspection #
-        #######################################
 
         # name your image according to how many training epochs the generator has undergone
         gen_sample_name = "generated_images_epoch{0:0=2d}.tif".format(epoch + 1)
         print(f"Epoch [{epoch + 1}/{n_epochs}] - saving {gen_sample_name}")
+
+        # try:
         # pass upsampled low-z-res sample image through the generator
-        sample_img = gen(input_sample.unsqueeze(0).unsqueeze(0))
+        sample_img = gen(upsampled_sample)
+
+        # except:
+        #     print("Used the non-upsampled image!")
+        #     sample_img = gen(input_sample.unsqueeze(0).unsqueeze(0))
+
         # gen_sample_tosave = torch.squeeze(gen_sample).cpu().numpy()
         # save the sample super-res image
         imwrite(
             os.path.join(path_gens, gen_sample_name),
             torch.squeeze(sample_img).cpu().numpy(),
         )
+
+        ###############################################################
+        # calculating the difference between input and output samples #
+        ###############################################################
+
+        # calculate the total difference between the input and output images (which should be identical)
+        # save to a list to be graphed against epochs
+        input_output_sample_diff = torch.abs(torch.sum(output_sample - input_sample))
+        input_output_sample_diff = input_output_sample_diff.item()
+        input_output_sample_loss.append(input_output_sample_diff)
 
     # get fourier power spectra...
     # for the x projection
@@ -468,6 +494,7 @@ with open(metadata, "a") as file:
             f"\nloss_dis_fake_scaler = {loss_dis_fake_scaler}",
             f"\nwindowing function = {window}",
             f"\ndiscriminator type = {type_disc}",
+            f"\nimage directory = {path_data}",
         ]
     )
 
@@ -564,6 +591,7 @@ for i in range(fourier_list.shape[1]):
 ##########################################################################
 # plot the sum of pixel differences between input and output sample images
 ##########################################################################
+
 # plt.figure(n_figures)
 plt.figure()
 

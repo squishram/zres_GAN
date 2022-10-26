@@ -54,10 +54,13 @@
   - [x] play with the windowing functions
   - [x] more L1 loss tends to result in blurriness - maybe bump up the 'GAN'-loss and see what that does?
   - [x] L1*10000, GAN*1000, Fourier*1 = best so far
-  - [ ] try more epochs - then try making a larger dataset
+  - [x] try more epochs - then try making a larger dataset
+  - [ ] generate a CUBIC ground truth as well when you make your dataset - that way you'll have something to compare to the Gen(Upsampled(Input))
+    - [ ] generate a test dataset and import that into the program as the sample image instead of picking out a random image from the training dataset
+  - [ ] try graphing the unfiltered projections as well as the filtered ones
   - [ ] try random adding vertical/ horizontal/ axial flips/ rotations to the dataset on each epoch to avoid biasing without having to use enormous datasets
   - [ ] do PROPER normalisation - get the mean and stdev values of the image and use those to normalise the image before training! - is this okay for microscopy images where intensity needs to be preserved?
-  - [ ] adapt the adversary/discriminator to use 'patch-GAN'
+  - [x] adapt the adversary/discriminator to use 'patch-GAN'
   - [ ] try reducing mitochondrial "movement" in z for the mitochondria simulations
   - [ ] pass some of my data through it and see what happens
 
@@ -82,3 +85,5 @@
   - training on simulated data seems like the best idea
   - varying the size of the z-psf across simulated data
   - but testing/verifying on real data is essential ofc
+  - remember to have a test loop
+  - IMPORTANT and remember to turn of gradient calculations when you do it!

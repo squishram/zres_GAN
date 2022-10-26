@@ -20,6 +20,7 @@ import os
 import random as r
 import numpy as np
 from time import perf_counter
+import torch
 from tifffile import imwrite
 
 
@@ -231,7 +232,7 @@ def image_of_gaussians(data, size_img, n_chunks, overlap):
 
                 intensityspot = np.zeros((size_chunk[0], size_chunk[1], size_chunk[2]))
 
-                # TODO do we want to include a patch calculation here?
+                # TODO: do we want to include a patch calculation here?
                 for cx, cy, cz, cintensity, csig_xy, csig_z in chunked_data[x][y][z]:
                     # define the normalisation constant for the gaussian
                     const_norm = cintensity / ((csig_xy**3) * (2 * np.pi) ** 1.5)
@@ -250,6 +251,144 @@ def image_of_gaussians(data, size_img, n_chunks, overlap):
 
     return np.array(img)
 
+
+def image_of_gaussians2(data, size_img ):
+    """
+    Breaks up coordinate data into 3D chunks to decrease runtime,
+    Retrieves gaussian contributions to each pixel
+    using coordinate, intensity, and sigma data
+    outputs n_chunks arrays
+    each with the data that could contribute to chunk n_chunks.
+    // data is the coordinates of the points that will be made into an image
+    AND their intensity, sigma_xy and sigma_z.
+    It is an array with dimensions (6, n_points)
+    // size_img is the dimensions of the final image,
+    tuple (size_x, size_y, size_z)
+    // n_chunks should be a 3 element vector
+    containing x, y, z chunking values respectively
+    """
+
+    # this output will contain the final image with illuminated pixels
+    img = np.zeros(tuple(size_img))
+
+    # the size of each chunk
+    # // is 'floor division' i.e. divide then round down the result
+    size_chunk = np.array([size_img[i] // n_chunks[i] for i in range(3)])
+
+    # make an object array to contain all the data inside each chunk
+    # (roughly equivalent to matlab cell array in that
+    # each object/unit/cell can contain anything i.e. an array of any size)
+    chunked_data = np.empty([n_chunks[0], n_chunks[1], n_chunks[2]], dtype=object)
+
+    # assign an empty array as each object in chunked_data
+    for x in range(n_chunks[0]):
+        for y in range(n_chunks[1]):
+            for z in range(n_chunks[2]):
+                chunked_data[x][y][z] = []
+
+    # This loop loads up the empty arrays with chunked_data
+    for j in range(len(data[0])):
+        for x in range(n_chunks[0]):
+            xstart = (size_img[0] * x) // n_chunks[0]
+            for y in range(n_chunks[1]):
+                ystart = (size_img[1] * y) // n_chunks[1]
+                for z in range(n_chunks[2]):
+                    zstart = (size_img[2] * z) // n_chunks[2]
+
+                    # edited to include the sigma & intensity information
+                    if (
+                        (
+                            data[0][j] < xstart - overlap[0]
+                            or data[0][j] >= (xstart + size_chunk[0] + overlap[0])
+                        )
+                        or (
+                            data[1][j] < ystart - overlap[1]
+                            or data[1][j] >= (ystart + size_chunk[1] + overlap[1])
+                        )
+                        or (
+                            data[2][j] < zstart - overlap[2]
+                            or data[2][j] >= (zstart + size_chunk[2] + overlap[2])
+                        )
+                    ):
+                        continue
+                    # if the point is inside the chunk, append it to that chunk
+                    chunked_data[x][y][z].append([data[i][j] for i in range(6)])
+
+    # creates a matrix of indices for each dimension (x, y, and z) each is 1 patch large -
+    chunk_ind = np.indices((size_chunk[0], size_chunk[1], size_chunk[2]))
+
+    # This loop sums the contributions from each local gaussian to each chunk
+    for x in range(n_chunks[0]):
+        xstart = (size_img[0] * x) // n_chunks[0]
+        for y in range(n_chunks[1]):
+            ystart = (size_img[1] * y) // n_chunks[1]
+            for z in range(n_chunks[2]):
+                zstart = (size_img[2] * z) // n_chunks[2]
+
+                intensityspot = np.zeros((size_chunk[0], size_chunk[1], size_chunk[2]))
+
+                # TODO: do we want to include a patch calculation here?
+                for cx, cy, cz, cintensity, csig_xy, csig_z in chunked_data[x][y][z]:
+                    # define the normalisation constant for the gaussian
+                    const_norm = cintensity / ((csig_xy**3) * (2 * np.pi) ** 1.5)
+                    # add the gaussian contribution to the spot
+                    intensityspot += const_norm * np.exp(
+                        -(
+                            ((chunk_ind[0] + xstart - cx) ** 2) / (2 * csig_xy**2)
+                            + ((chunk_ind[1] + ystart - cy) ** 2) / (2 * csig_xy**2)
+                            + ((chunk_ind[2] + zstart - cz) ** 2) / (2 * csig_z**2)
+                        )
+                    )
+                xend = xstart + size_chunk[0]
+                yend = ystart + size_chunk[1]
+                zend = zstart + size_chunk[2]
+                img[xstart:xend, ystart:yend, zstart:zend] = intensityspot
+
+    return np.array(img)
+
+
+def simulated_image(data, img_size):
+
+    ##############################
+    # generate tensor of indices #
+    ##############################
+
+    # this is a 2D box of x-indices
+    # size = (img_size[0], img_size[1])
+    x_indices = torch.arange(img_size[0]).unsqueeze(0).expand(img_size)
+    # this is a 2D box of y-indices
+    # size = (img_size[0], img_size[1])
+    y_indices = torch.arange(img_size[1]).unsqueeze(1).expand(img_size)
+    # this is a 3D box of xy-indices, made by stacking the previous two
+    # size = (img_size[0], img_size[1], 2)
+    xy_indices = torch.stack([x_indices, y_indices], 2)
+    # this is a 4D box of xy_indices, so that every molecule 'gets its own coordinate array'
+    # size = (n_molecules, img_size[0], img_size[1], 2)
+    xy_indices = xy_indices.unsqueeze(0).expand(data.shape[0], img_size[0], img_size[1], 2)
+
+    ##############################################
+    # generate coordinates of gaussian centroids #
+    ##############################################
+
+    # x-centroids of molecules
+    # size = (5,)
+    x_means = img_size[0] * torch.rand(n_molecules)
+    # y-centroids of molecules
+    # size = (5,)
+    y_means = img_size[1] * torch.rand(n_molecules)
+    # xy-centroids of molecules, made by stacking the previous two
+    # size = (5, 2)
+    xy_means = torch.stack((x_means, y_means), 1)
+    # a tensor the size of the image, but every element is the xy-centroid of the molecules
+    # size = (n_molecules, img_size[0], img_size[1], 2)
+    xy_means = xy_means.unsqueeze(1).unsqueeze(2).expand(xy_indices.shape)
+
+    # xy-indices and xy_means are now the same size, so we can do xy-indices - xy_means
+    gaussians = torch.exp((-(xy_indices - xy_means) ** 2).sum(-1) / (2 * sigma**2)).sum(0)
+    print(f"(xy-indices - xy_means).sum(-1) =\n{(xy_indices - xy_means).sum(-1)}")
+    print(f"shape(xy-indices - xy_means).sum(-1) =\n{((xy_indices - xy_means).sum(-1)).shape}")
+
+    return gaussians
 
 # Initialize timer
 time1 = perf_counter()

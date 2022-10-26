@@ -6,6 +6,9 @@ ToDo
 - [ ] try getting rid of batchnorm??
 - [ ] try residual learning - add U to G before doing everything else
 - [ ] try Lanczos upsampling (in opencv) instead of trilinear upsampling
+- [ ] try looking at what the gaussian z-blur actually does in Fiji (might not be much)
+- [x] try making your code a bit more streamlined
+- [x] look at your images with projections, not 3D-project
 
 pseudo-code for new affirm3d, which does not use the ground truth to calculate the real-space loss:
 
@@ -40,15 +43,17 @@ import torch.nn as nn
 import torch.nn.functional as tf
 import torch.optim as optim
 from affirm3d_noGT_functions import (
+    gaussian_kernel,
+    conv_1D_z_axis,
+    fourier_loss,
+    initialise_weights,
+)
+from affirm3d_noGT_classes import (
     FourierProjection,
     Custom_Dataset,
     Generator,
     Discriminator,
     MarkovianDiscriminator,
-    gaussian_kernel,
-    conv_1D_z_axis,
-    fourier_loss,
-    initialise_weights,
 )
 from torch.utils.data import DataLoader
 from tifffile import imwrite
@@ -170,7 +175,7 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_worker
 sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 # sig_extra is derived from the formula of convolving 2 gaussians, where it is defined as:
-# gaussian(sigma=sig_lores) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_extra)
+# gaussian(sigma=sig_hires) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_lores)
 sig_extra = math.sqrt(sig_lores**2 - sig_hires**2)
 
 # this function can create filtered fourier projections
@@ -178,16 +183,13 @@ sig_extra = math.sqrt(sig_lores**2 - sig_hires**2)
 projector = FourierProjection(sig_lores, window)
 
 # Generator Setup
-gen = Generator(features_gen, kernel_size, padding).to(device)
+gen = Generator(features_gen).to(device)
 initialise_weights(gen)
 gen.train()
 
 # Discriminator Setup
 if type_disc == "patchgan":
     dis = MarkovianDiscriminator(features_dis).to(device)
-elif type_disc == "normal":
-    dis = Discriminator(features_dis).to(device)
-# adding this "else" to make sure I don't get "dis is possibly unbound" LSP diagnostic errors
 else:
     dis = Discriminator(features_dis).to(device)
 initialise_weights(dis)

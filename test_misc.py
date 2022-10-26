@@ -6,7 +6,7 @@ testing Susan's function
 import os
 from pathlib import Path
 from typing import Union
-from affirm3d_noGT_functions import Custom_Dataset_Pairs
+from affirm3d_noGT_classes import Custom_Dataset_Pairs
 from torch.utils.data import DataLoader
 import torch
 import torch.nn.functional as tf

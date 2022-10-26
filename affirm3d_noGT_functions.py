@@ -485,6 +485,19 @@ class MarkovianDiscriminator(nn.Module):
         return torch.mean(self.disc(x))
 
 
+def initialise_weights(model):
+    """
+    Weight Initiliaser
+    input: the generator instance
+    output: the generator instance, with initalised weights
+            (for the Conv3d and BatchNorm3d layers)
+            i.e. they are normally distributed with normal 0 and sigma 0.02
+    """
+    for m in model.modules():
+        if isinstance(m, (nn.Conv3d, nn.BatchNorm3d)):
+            nn.init.normal_(m.weight.data, 0.0, 0.02)
+
+
 def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
     """
     Make a normalized 1D Gaussian kernel
@@ -588,20 +601,6 @@ def fourier_loss(x_proj: torch.Tensor, y_proj: torch.Tensor, z_proj: torch.Tenso
         freq_domain_loss = torch.tensor((freq_domain_loss_x, freq_domain_loss_y))
 
     return freq_domain_loss
-
-
-def initialise_weights(model):
-    """
-    Weight Initiliaser
-    input: the generator instance
-    output: the generator instance, with initalised weights
-            (for the Conv3d and BatchNorm3d layers)
-            i.e. they are normally distributed with normal 0 and sigma 0.02
-
-    """
-    for m in model.modules():
-        if isinstance(m, (nn.Conv3d, nn.BatchNorm3d)):
-            nn.init.normal_(m.weight.data, 0.0, 0.02)
 
 
 def test():

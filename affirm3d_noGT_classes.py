@@ -263,12 +263,12 @@ class Custom_Dataset(Dataset):
         # add channels dimension
         img = img.unsqueeze(0)
         # now: img.shape = (1, z, x, y)
-        img = torch.swapaxes(img, 2, 3)
+        img = torch.swapaxes(img, -2, -1)
         # now: img.shape = (1, z, y, x)
 
         # apply transform from torchio library if defined
-        if self.transform:
-            img = self.transform(img)
+        if self.transform is not None:
+            img = self.transform(image=img)
 
         return img
 
@@ -313,10 +313,12 @@ class MarkovianDiscriminator(nn.Module):
         super().__init__()
 
         self.disc = nn.Sequential(
-            *conv(1, n_features * 8, downsample=2, batchnorm=False),
-            *conv(n_features * 8, n_features * 4, downsample=2),
-            *conv(n_features * 4, n_features * 2, downsample=2),
-            *conv(n_features * 2, n_features * 1, downsample=2),
+            # *conv(1, n_features * 8, maxpool=2, batchnorm=False),
+            # *conv(n_features * 8, n_features * 4, maxpool=2),
+
+            *conv(1, n_features * 4, maxpool=2, batchnorm=False),
+            *conv(n_features * 4, n_features * 2, maxpool=2),
+            *conv(n_features * 2, n_features * 1, maxpool=2),
             *conv(n_features * 1, 1, batchnorm=False, relu=False),
             nn.Sigmoid(),
         )

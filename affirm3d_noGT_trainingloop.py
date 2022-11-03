@@ -1,14 +1,14 @@
 """
 ToDo
-- [ ] save the actual generated image not just the output one
 - [x] try with only L1 loss
 - [x] try with a little bit of adversarial loss
+- [x] try making your code a bit more streamlined
+- [x] look at your images with projections, not 3D-project
+- [ ] save the actual generated image not just the output one
 - [ ] try getting rid of batchnorm??
 - [ ] try residual learning - add U to G before doing everything else
 - [ ] try Lanczos upsampling (in opencv) instead of trilinear upsampling
 - [ ] try looking at what the gaussian z-blur actually does in Fiji (might not be much)
-- [x] try making your code a bit more streamlined
-- [x] look at your images with projections, not 3D-project
 
 pseudo-code for new affirm3d, which does not use the ground truth to calculate the real-space loss:
 
@@ -36,12 +36,15 @@ import os
 from pathlib import Path
 from datetime import date
 import numpy as np
-import math
+from math import sqrt, log
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as tf
 import torch.optim as optim
+
+# import albumentations
+# from albumentations.pytorch import ToTensorV2
 from affirm3d_noGT_functions import (
     gaussian_kernel,
     conv_1D_z_axis,
@@ -97,11 +100,18 @@ filename = "mtubs_sim_*.tif"
 today = str(date.today())
 # remove dashes
 today = today.replace("-", "")
+
+# give unique path to generated image directory
+counter = 1
 path_gens = os.path.join(
     os.getcwd(), Path("images/sims/microtubules/generated/"), today
 )
-# path_gens = Path(f"{os.getcwd()}images/sims/microtubules/generated/{today}")
-os.makedirs(path_gens, exist_ok=True)
+ext = "_" + str(counter)
+while os.path.exists(path_gens + ext):
+    counter += 1
+    ext = "_" + str(counter)
+
+path_gens = path_gens + ext
 
 # path to saved networks (for retrieval/ testing)
 path_models = os.path.join(path_gens, Path("models"))
@@ -119,12 +129,12 @@ learning_rate = 1e-3
 # relative scaling of the loss components (use 0 and 1 to see how well they do alone)
 # combos that seem to kind of 'work': 1, 1, 1 & 1, 1
 # for the generator:
-freq_domain_loss_scaler = 0
-space_domain_loss_scaler = 100
-adversary_gen_loss_scaler = 0.1
+freq_domain_loss_scaler = 0.0001
+space_domain_loss_scaler = 10
+adversary_gen_loss_scaler = 1
 # for the discriminator:
-loss_dis_real_scaler = 0.1
-loss_dis_fake_scaler = 0.1
+loss_dis_real_scaler = 1
+loss_dis_fake_scaler = 1
 # batch size, i.e. #forward passes per backpropagation
 batch_size = 5
 # number of epochs i.e. number of times you re-use the same training images
@@ -157,6 +167,13 @@ type_disc = "patchgan"
 # DATASET AND DATALOADER #
 ##########################
 
+# # add a transform
+# transformoid = albumentations.Compose(
+#     [
+#         albumentations.Normalize(mean=0.0309, std=0.0740),
+#     ]
+# )
+
 # image datasets
 dataset = Custom_Dataset(
     dir_data=path_data,
@@ -172,11 +189,11 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_worker
 ########################################
 
 # sigma for real (lores) and isomorphic (hires) data
-sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
-sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
+sig_lores = (zres_lo / size_pix_nm) / (2 * sqrt(2 * log(2)))
+sig_hires = (zres_hi / size_pix_nm) / (2 * sqrt(2 * log(2)))
 # sig_extra is derived from the formula of convolving 2 gaussians, where it is defined as:
 # gaussian(sigma=sig_hires) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_lores)
-sig_extra = math.sqrt(sig_lores**2 - sig_hires**2)
+sig_extra = sqrt(sig_lores**2 - sig_hires**2)
 
 # this function can create filtered fourier projections
 # fields: z_sigma, window type
@@ -212,7 +229,7 @@ opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 data_iterator = iter(dataloader)
 # pull out a single batch of data
 data_batch = next(data_iterator).to(device)
-# from the batch, pull out a single imag
+# from the batch, pull out a single image
 input_sample = data_batch[0, 0, :, :, :]
 # how big are these images?
 size_img = list(input_sample.shape)

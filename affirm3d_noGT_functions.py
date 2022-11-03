@@ -12,17 +12,20 @@ import torch.nn.functional as tf
 def conv(
     in_channels: int,
     out_channels: int,
-    downsample: int = 0,
+    maxpool: int = 0,
     batchnorm: bool = True,
     relu: bool = True,
 ) -> nn.ModuleList:
     """
-    Convolutional layer (as list of modules)
-    Performs the following transform:
-    1. convolution
-    2. batchnorm (optional)
-    3. leaky ReLU() (optional)
-    4. pooling layer for downsampling (optional)
+    Inputs
+        in_channels (int): number of channels in the input
+        out_channels (int): number of channels in the output
+        maxpool (int): rate of downsampling (adds MaxPool3d layer if != 0)
+        batchnorm (bool): whether to include a BatchNorm3d layer
+        relu (bool): whether to include a LeakyReLU(0.2) layer
+
+    Returns:
+        convolutional layer as list of torch.nn modules
     """
 
     # define the convolutional layer
@@ -48,14 +51,14 @@ def conv(
         conv.append(nn.LeakyReLU(0.2, inplace=True))
 
     # add maxpool layer (to downsample for discriminators)
-    if downsample != 0:
+    if maxpool != 0:
         # conv = [nn.MaxPool3d(downsample)] + conv
-        conv.append(nn.MaxPool3d(downsample))
+        conv.append(nn.MaxPool3d(maxpool))
 
     return conv
 
 
-def initialise_weights(model: nn.ModuleList):
+def initialise_weights(model):
     """
     Weight Initiliaser
     input: the generator instance
@@ -88,11 +91,11 @@ def conv_1D_z_axis(
     Perform a 1-D convolution along the z-axis to downsample along that dimension
     """
 
-    # make sure calculations in these classes can be done on the GPU
+    # make sure calculations can be done on the GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     assert len(data.size()) == 5, "Data must have dimensions [batch, channels, z, y, x]"
-    assert len(kernel.size()) == 1, "Kernel must be 1D"
+    assert len(kernel.size()) == 1, "Kernel must be 0D"
     assert len(kernel) % 2 == 1, "Kernel must be have odd side length"
 
     #

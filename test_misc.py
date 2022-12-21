@@ -1,20 +1,11 @@
-"""
-current use of test.misc:
-testing Susan's function
-"""
-
+import numpy as np
+import tifffile
+from datetime import date
 import os
 from pathlib import Path
-from typing import Union
-from affirm3d_noGT_classes import Custom_Dataset_Pairs
-from torch.utils.data import DataLoader
+import math
 import torch
 import torch.nn.functional as tf
-import numpy as np
-import math
-
-
-Number = Union[int, float]
 
 
 def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
@@ -23,10 +14,10 @@ def gaussian_kernel(sigma: float, sigmas: float = 3.0) -> torch.Tensor:
     """
 
     radius = math.ceil(sigma * sigmas)
-    xs = np.array(range(-radius, radius + 1))
-    kernel = np.exp(-(xs**2) / (2 * sigma**2))
+    xs = torch.tensor(range(-radius, radius + 1), dtype=torch.float)
+    kernel = torch.exp(-(xs**2) / (2 * sigma**2))
 
-    return torch.tensor(kernel / sum(kernel), dtype=torch.float)
+    return kernel / sum(kernel)
 
 
 def conv_1D_z_axis(
@@ -37,14 +28,17 @@ def conv_1D_z_axis(
     Perform a 1-D convolution along the z-axis to downsample along that dimension
     """
 
+    # make sure calculations can be done on the GPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     assert len(data.size()) == 5, "Data must have dimensions [batch, channels, z, y, x]"
-    assert len(kernel.size()) == 1, "Kernel must be 1D"
+    assert len(kernel.size()) == 1, "Kernel must be 0D"
     assert len(kernel) % 2 == 1, "Kernel must be have odd side length"
 
     #
     radius = int(len(kernel - 1) / 2)
     # kernel is [z], we need [channels out, channels in, z, y, x] = [1, 1, z, 1, 1]
-    kernel = kernel.unsqueeze(0).unsqueeze(0).unsqueeze(3).unsqueeze(4)
+    kernel = kernel.unsqueeze(0).unsqueeze(0).unsqueeze(3).unsqueeze(4).to(device)
 
     # add z-padding of zeros
     if pad == "zeros":
@@ -63,80 +57,28 @@ def conv_1D_z_axis(
 
     # punish users who do not use padding for their insolence
     else:
-        padding = (0, 0, 0)
         print("WARNING: you are not using any padding!")
-        print(f"{pad} is not a valid padding setting")
+        assert False, f"{pad} is not a valid padding setting"
 
     # perform convolution
     return tf.conv3d(data, kernel, bias=None, stride=(stride, 1, 1), padding=padding)
 
 
-# put it on the gpu!
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+if __name__ == "__main__":
 
-# stride of the downsampler kernel in z
-kernel_stride_ds = 3
-# batch size
-batch_size = 5
+    print(np.array([2, 4, 6]) / np.array([1, 2, 3]))
 
-##################
-# WITH REAL DATA #
-##################
+    # sigma for real (lores) and isomorphic (hires) data
+    sig_lores = (zres_lo / size_pix_nm) / (2 * sqrt(2 * log(2)))
+    sig_hires = (zres_hi / size_pix_nm) / (2 * sqrt(2 * log(2)))
+    # sig_extra is derived from the formula of convolving 2 gaussians, where it is defined as:
+    # gaussian(sigma=sig_hires) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_lores)
+    sig_extra = sqrt(sig_lores**2 - sig_hires**2)
 
-# # path to data
-# path_data = os.path.join(os.getcwd(), Path("images/sims/microtubules/"))
-# path_hires = os.path.join(path_data, "hires_test_batch")
-# path_lores = os.path.join(path_data, "lores_test_batch")
-# # glob of filnames
-# filename = "mtubs_sim_*.tif"
-#
-# # dataset:
-# dataset = Custom_Dataset_Pairs(
-#     dir_data=path_data,
-#     subdirs=(path_lores, path_hires),
-#     filename=filename,
-#     transform=None,
-# )
-# # image dataloaders when loading in hires and lores together
-# dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-#
-# # iterable from the dataloader
-# data_iterator = iter(dataloader)
-# # pull out a single batch of data
-# data_batch = next(data_iterator)
-# lores_batch = data_batch[:, 0, :, :, :, :]
-# hires_batch = data_batch[:, 1, :, :, :, :]
-# # from the batch, pull out a single image each of hires and lores data
-# lowimg = lores_batch[0, 0, :, :, :]
-# higimg = hires_batch[0, 0, :, :, :]
+    stride_downsampler = 3
 
-##################
-# WITH FAKE DATA #
-##################
-
-# generate batched data of random numbers
-hires_batch = torch.rand(5, 1, 96, 96, 96)
-
-# camera pixel size
-size_pix_nm = 100.0
-# z-resolution (output of generator)
-zres_hi = 240.0
-# z-resolution (input to generator)
-zres_lo = 600.0
-
-# sigma for real (lores) and isomorphic (hires) data
-sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
-sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
-# this is derived from the formula of convolving 2 gaussians, where sig_extra is defined as:
-# gaussian(sigma=sig_lores) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_extra)
-sig_extra = math.sqrt(sig_lores**2 - sig_hires**2)
-
-# generate gaussian kernel for downsampling
-kernel = gaussian_kernel(sig_extra, 6.0)
-# apply downsampling convolution
-downsampled_batch = conv_1D_z_axis(hires_batch, kernel, kernel_stride_ds)
-
-# printouts:
-print(f"the hi-res  batch has dims {hires_batch.shape}")
-print(f"downsampled batch has dims {downsampled_batch.shape}")
-print("Finished")
+    path_hires = os.path.join(
+        os.getcwd(), Path("images/sims/microtubules/hires_v2/mtubs_sim_1_hires.tif")
+    )
+    hires_img = tifffile.imread(path_hires)
+    conv_1D_z_axis(gaussian_kernel(sig_extra, 6.0), stride_downsampler, "zeros")

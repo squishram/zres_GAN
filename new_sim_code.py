@@ -1,13 +1,17 @@
 """
-This code generates 3D images of simulated microtubules. Workflow:
+This code generates 3D images of simulated microtubules.
 1. Uses a 3D random walk with constant step sizes
-and limited 'turn sharpness' to generate coordinates
-2. Creates an empty 3 dimensional array
-3. Sums up all gaussian contributions to each pixel in 'patches'
-   i.e volume subsections of the final image
-4. Scales up the signal to match the desired image bittage
-and saves the final array as a tiff
+and limited 'turn sharpness' to generate a list of coordinates
+(the random_walk() function)
+2. assigns a semi-randomised sigma_xy, sigma_z, and intensity to each coordinate
+3. creates a matrix of indices
+4. adds each coordinate's signal contribution to every pixel in the image in a for loop
 
+THE CHALLENGE:
+Although we are provided with a list of coordiantes, it is still difficult to make a GT and non-GT version of the same image.
+Converting between resolutions is easy (we simply apply a different sigma_z to the same coordinate set)
+Converting between samplings is difficult, because we actually need to change the z-coordinates of the array and I'm not sure how
+(if we divide all the z-values by (sigma_z/sigma_xy), it sort of compresses it and it doesn't look right, but maybe I am doing it wrong - should this work?)
 """
 
 from datetime import date
@@ -76,8 +80,6 @@ def random_walk(
     // reinitialise = whether or not the walk is reinitialised
     at a random location when it leaves the space (saves memory), dtype = bool
     """
-
-    random_numbers = torch.zeros((t, 10))
 
     # x, y, z will contain a list of all of the positions
     x = torch.zeros(t)
@@ -247,8 +249,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 today = str(date.today())
 today = today.replace("-", "")
 # path to data
-path_lores = os.path.join(os.getcwd(), "images/sims/microtubules/lores_v2/")
-path_hires = os.path.join(os.getcwd(), "images/sims/microtubules/hires_v2/")
+path_lores = os.path.join(os.getcwd(), "images/sims/microtubules/lores_test/")
+path_hires = os.path.join(os.getcwd(), "images/sims/microtubules/hires_test/")
 # make directories if they don't already exist so images have somewhere to go
 os.makedirs(path_lores, exist_ok=True)
 os.makedirs(path_hires, exist_ok=True)
@@ -267,7 +269,7 @@ freq = 440
 ##############
 
 # number of images to produce (for each resolution if making GT as well):
-n_imgs = 5
+n_imgs = 1
 # file name root (include underscore at the end):
 filename = "sim_mtubs_"
 # bittage of final image - 8 | 16 | 32 | 64
@@ -288,6 +290,8 @@ size_img_hires = torch.tensor([96, 96, 96]).to(device)
 max_step = 0.5
 # how sharply can the path bend each step?
 sharpest = (np.pi * max_step) / 10
+# do we want the hires data to have the same coordinates as the lores data?
+same = True
 
 #############
 # PSF specs #
@@ -322,16 +326,14 @@ mean_sigz = (zres / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 for i in range(n_imgs):
     # generate data as list of 3d coordinates
     lores_data = random_walk(t, size_img_lores, max_step, sharpest)
-    hires_data = torch.tensor(
-        torch.cat(
-            (
-                lores_data[:, 0].unsqueeze(-1),
-                lores_data[:, 1].unsqueeze(-1),
-                torch.mul(3, lores_data[:, 2]).unsqueeze(-1),
-            ),
-            dim=-1,
-        )
-    ).to(device)
+
+    # the if statement checks the 'same' variable
+    # which is whether we want the hires and lores data to have the same coordinates
+    if not same:
+        hires_data = random_walk(t, size_img_hires, max_step, sharpest)
+    else:
+        ratio = (size_img_hires / size_img_lores).expand(len(lores_data), -1)
+        hires_data = lores_data * ratio
 
     # broadcast intensity & sigma values into arrays with slight randomness to their values
     intensity = semirandomised_values(mean_int, int_unc, len(lores_data))

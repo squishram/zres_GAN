@@ -11,7 +11,9 @@ THE CHALLENGE:
 Although we are provided with a list of coordiantes, it is still difficult to make a GT and non-GT version of the same image.
 Converting between resolutions is easy (we simply apply a different sigma_z to the same coordinate set)
 Converting between samplings is difficult, because we actually need to change the z-coordinates of the array and I'm not sure how
+
 (if we divide all the z-values by (sigma_z/sigma_xy), it sort of compresses it and it doesn't look right, but maybe I am doing it wrong - should this work?)
+currently, I have this (non-working) solution implemented whenever same = True
 """
 
 from datetime import date
@@ -168,6 +170,33 @@ def semirandomised_values(mean: float, uncertainty: float, size: int) -> torch.T
     return output
 
 
+def gaussian(
+    intensity,
+    sigma_xy,
+    sigma_z,
+    x_indices,
+    y_indices,
+    z_indices,
+    x_coordinates,
+    y_coordinates,
+    z_coordinates,
+):
+    gaussian = (
+        # normalisation constant for 3D gaussian
+        (intensity[i] / ((sigma_xy[i] ** 3) * (2 * np.pi) ** 1.5))
+        # gaussian equation
+        * torch.exp(
+            -(
+                ((x_indices - x_coordinates) ** 2) / (2 * sigma_xy**2)
+                + ((y_indices - y_coordinates) ** 2) / (2 * sigma_xy**2)
+                + ((z_indices - z_coordinates) ** 2) / (2 * sigma_z**2)
+            )
+        )
+    )
+
+    return gaussian
+
+
 def simulated_image(coordinates, img_size, intensity, sigma_xy, sigma_z):
 
     #####################
@@ -219,6 +248,7 @@ def simulated_image(coordinates, img_size, intensity, sigma_xy, sigma_z):
     # add the gaussian contribution to the spot
     gaussians = torch.zeros((img_size[0], img_size[1], img_size[2])).to(device)
     for i in range(coordinates.shape[0]):
+
         gaussians += (
             # normalisation constant for 3D gaussian
             (intensity[i] / ((sigma_xy[i] ** 3) * (2 * np.pi) ** 1.5))
@@ -327,13 +357,16 @@ for i in range(n_imgs):
     # generate data as list of 3d coordinates
     lores_data = random_walk(t, size_img_lores, max_step, sharpest)
 
+    # NOTE: this is a work in progress!
     # the if statement checks the 'same' variable
     # which is whether we want the hires and lores data to have the same coordinates
-    if not same:
-        hires_data = random_walk(t, size_img_hires, max_step, sharpest)
-    else:
+    # then multiplies all the z-coordinates by the difference
+    # FIX: at the moment it multiplies all of the data - just do the z-coordinates!
+    if same:
         ratio = (size_img_hires / size_img_lores).expand(len(lores_data), -1)
         hires_data = lores_data * ratio
+    else:
+        hires_data = random_walk(t, size_img_hires, max_step, sharpest)
 
     # broadcast intensity & sigma values into arrays with slight randomness to their values
     intensity = semirandomised_values(mean_int, int_unc, len(lores_data))

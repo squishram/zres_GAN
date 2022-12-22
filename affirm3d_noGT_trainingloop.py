@@ -1,14 +1,14 @@
 """
 ToDo
-- [ ] save the actual generated image not just the output one
 - [x] try with only L1 loss
 - [x] try with a little bit of adversarial loss
+- [x] try making your code a bit more streamlined
+- [x] look at your images with projections, not 3D-project
+- [ ] save the actual generated image not just the output one
 - [ ] try getting rid of batchnorm??
 - [ ] try residual learning - add U to G before doing everything else
 - [ ] try Lanczos upsampling (in opencv) instead of trilinear upsampling
 - [ ] try looking at what the gaussian z-blur actually does in Fiji (might not be much)
-- [x] try making your code a bit more streamlined
-- [x] look at your images with projections, not 3D-project
 
 pseudo-code for new affirm3d, which does not use the ground truth to calculate the real-space loss:
 
@@ -36,7 +36,7 @@ import os
 from pathlib import Path
 from datetime import date
 import numpy as np
-import math
+from math import sqrt, log
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -82,9 +82,95 @@ alarm_freq = 340
 # start a timer!
 start_time = perf_counter()
 
+###########
+# STORAGE #
+###########
+
+# path to data
+path_data = os.path.join(
+    os.getcwd(), Path("images/sims/microtubules/noGT_LD_zres5xWorse")
+)
+# glob of filenames
+filename = "mtubs_sim_*.tif"
+
+# path to generated images - will make directory if there isn't one already
+# get the date
+today = str(date.today())
+# remove dashes
+today = today.replace("-", "")
+
+# give unique path to generated image directory
+counter = 1
+path_gens = os.path.join(
+    os.getcwd(), Path("images/sims/microtubules/generated/"), today
+)
+ext = "_" + str(counter)
+while os.path.exists(path_gens + ext):
+    counter += 1
+    ext = "_" + str(counter)
+
+path_gens = path_gens + ext
+
+# path to saved networks (for retrieval/ testing)
+path_models = os.path.join(path_gens, Path("models"))
+os.makedirs(path_gens, exist_ok=True)
+
+
+#####################
+# (HYPER)PARAMETERS #
+#####################
+
+# use gpu if available, otherwise cpu
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# learning rate
+learning_rate = 1e-3
+# relative scaling of the loss components (use 0 and 1 to see how well they do alone)
+# combos that seem to kind of 'work': 1, 1, 1 & 1, 1
+# for the generator:
+freq_domain_loss_scaler = 0.0001
+space_domain_loss_scaler = 10
+adversary_gen_loss_scaler = 1
+# for the discriminator:
+loss_dis_real_scaler = 1
+loss_dis_fake_scaler = 1
+# batch size, i.e. #forward passes per backpropagation
+batch_size = 5
+# number of epochs i.e. number of times you re-use the same training images
+n_epochs = 10
+# after how many backpropagations do you generate a new image?
+save_increment = 50
+# channel depth of generator hidden layers in integers of this number
+features_gen = 16
+# channel depth of discriminator hidden layers in integers of this number
+features_dis = 16
+# the side length of the convolutional kernel in the network
+kernel_size = 3
+# the stride of the kernel responsible for downsampling the generated image
+stride_downsampler = 3
+# padding when doing convolutions to ensure no change in image size
+padding = int(kernel_size / 2)
+# NOTE: These nm bits used to be 10x higher, but I have changed them to the values they have in the simulated data generator
+# pixel size in nm
+size_pix_nm = 10.0
+# z-resolution in the isotropic case
+zres_hi = 24.0
+# z-resolution in the anisotropic case
+zres_lo = 60.0
+# windowing function: can be hann, hamming, bharris
+window = "bharris"
+# type of discriminator: can be patchgan or normal
+type_disc = "patchgan"
+
 ##########################
 # DATASET AND DATALOADER #
 ##########################
+
+# # add a transform
+# transformoid = albumentations.Compose(
+#     [
+#         albumentations.Normalize(mean=0.0309, std=0.0740),
+#     ]
+# )
 
 # image datasets
 dataset = Custom_Dataset(
@@ -101,11 +187,11 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_worker
 ########################################
 
 # sigma for real (lores) and isomorphic (hires) data
-sig_lores = (zres_lo / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
-sig_hires = (zres_hi / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
+sig_lores = (zres_lo / size_pix_nm) / (2 * sqrt(2 * log(2)))
+sig_hires = (zres_hi / size_pix_nm) / (2 * sqrt(2 * log(2)))
 # sig_extra is derived from the formula of convolving 2 gaussians, where it is defined as:
 # gaussian(sigma=sig_hires) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_lores)
-sig_extra = math.sqrt(sig_lores**2 - sig_hires**2)
+sig_extra = sqrt(sig_lores**2 - sig_hires**2)
 
 # this function can create filtered fourier projections
 # fields: z_sigma, window type
@@ -141,7 +227,7 @@ opt_dis = optim.Adam(dis.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 data_iterator = iter(dataloader)
 # pull out a single batch of data
 data_batch = next(data_iterator).to(device)
-# from the batch, pull out a single imag
+# from the batch, pull out a single image
 input_sample = data_batch[0, 0, :, :, :]
 # how big are these images?
 size_img = list(input_sample.shape)

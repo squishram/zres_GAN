@@ -55,6 +55,12 @@
   - [x] more L1 loss tends to result in blurriness - maybe bump up the 'GAN'-loss and see what that does?
   - [x] L1*10000, GAN*1000, Fourier*1 = best so far
   - [x] try more epochs - then try making a larger dataset
+
+### YOU ARE HERE
+  - [ ] sanity check: simulate the same data, lowres and highres versions, then see if you can convolve the hr one down to match the lr one
+      - [ ] sanity check: simulate the same data, lowres and highres versions, then see if you can convolve the hr one down to match the lr one
+      - [ ] does the sampling ratio and the resolution ratio have to be the same? Surely this is a kind of bias? need to fix
+
   - [ ] generate a CUBIC ground truth as well when you make your dataset - that way you'll have something to compare to the Gen(Upsampled(Input))
     - [ ] generate a test dataset and import that into the program as the sample image instead of picking out a random image from the training dataset
   - [ ] try graphing the unfiltered projections as well as the filtered ones

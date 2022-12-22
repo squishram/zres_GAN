@@ -8,6 +8,11 @@ and limited 'turn sharpness' to generate coordinates
 4. Scales up the signal to match the desired image bittage
 and saves the final array as a tiff
 
+TODO
+1. make the microtubules have length and start position/ stop position constraints
+2. get rid of the hires/ lores version of the data
+3. make it 2D?
+4. get rid of the to(device) stuff if necessary
 """
 
 from datetime import date
@@ -43,6 +48,12 @@ def rotation_matrix(axis: torch.Tensor, angle):
     s = torch.sin(angle)
 
     # and here it is!
+    rotmat2d = torch.tensor(
+        [
+            [c s],
+            [-s c]
+        ]
+    )
     rotmat = torch.tensor(
         [
             [
@@ -262,7 +273,7 @@ freq = 440
 ##############
 
 # number of images to produce (for each resolution if making GT as well):
-n_imgs = 2
+n_imgs = 1
 # file name root:
 filename = "sim_img_sim_noGT_"
 # bittage of final image - 8 | 16 | 32 | 64

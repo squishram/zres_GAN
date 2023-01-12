@@ -42,9 +42,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as tf
 import torch.optim as optim
-
-# import albumentations
-# from albumentations.pytorch import ToTensorV2
+from affirm3d_noGT_parameters import *
 from affirm3d_noGT_functions import (
     gaussian_kernel,
     conv_1D_z_axis,
@@ -280,6 +278,7 @@ for epoch in range(n_epochs):
         # it should look the same as I!
         output_batch = conv_1D_z_axis(
             gen_batch,
+            # FIX: figure out what the 6 is doing here????
             gaussian_kernel(sig_extra, 6.0),
             stride_downsampler,
         )

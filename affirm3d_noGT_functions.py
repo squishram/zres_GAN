@@ -3,7 +3,6 @@ functions for use in affirm3D and networks
 """
 
 import math
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as tf
@@ -98,9 +97,9 @@ def conv_1D_z_axis(
     assert len(kernel.size()) == 1, "Kernel must be 0D"
     assert len(kernel) % 2 == 1, "Kernel must be have odd side length"
 
-    #
+    # radius is half the side length of the kernel
     radius = int(len(kernel - 1) / 2)
-    # kernel is [z], we need [channels out, channels in, z, y, x] = [1, 1, z, 1, 1]
+    # kernel is [z], we need [batch, channels, z, y, x] = [1, 1, z, 1, 1]
     kernel = kernel.unsqueeze(0).unsqueeze(0).unsqueeze(3).unsqueeze(4).to(device)
 
     # add z-padding of zeros

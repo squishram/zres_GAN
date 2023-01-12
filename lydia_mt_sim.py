@@ -1,19 +1,18 @@
 """
-This code generates 3D images of simulated microtubules.
+This code generates 3D images of simulated microtubules. Workflow:
 1. Uses a 3D random walk with constant step sizes
-and limited 'turn sharpness' to generate a list of coordinates
-(the random_walk() function)
-2. assigns a semi-randomised sigma_xy, sigma_z, and intensity to each coordinate
-3. creates a matrix of indices
-4. adds each coordinate's signal contribution to every pixel in the image in a for loop
+and limited 'turn sharpness' to generate coordinates
+2. Creates an empty 3 dimensional array
+3. Sums up all gaussian contributions to each pixel in 'patches'
+   i.e volume subsections of the final image
+4. Scales up the signal to match the desired image bittage
+and saves the final array as a tiff
 
-THE CHALLENGE:
-Although we are provided with a list of coordiantes, it is still difficult to make a GT and non-GT version of the same image.
-Converting between resolutions is easy (we simply apply a different sigma_z to the same coordinate set)
-Converting between samplings is difficult, because we actually need to change the z-coordinates of the array and I'm not sure how
-
-(if we divide all the z-values by (sigma_z/sigma_xy), it sort of compresses it and it doesn't look right, but maybe I am doing it wrong - should this work?)
-currently, I have this (non-working) solution implemented whenever same = True
+TODO
+1. make the microtubules have length and start position/ stop position constraints
+2. get rid of the hires/ lores version of the data
+3. make it 2D?
+4. get rid of the to(device) stuff if necessary
 """
 
 from datetime import date
@@ -24,9 +23,10 @@ import numpy as np
 from time import perf_counter
 import torch
 from tifffile import imwrite
+from torch._C import uint8
 
 
-def rotation_matrix(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+def rotation_matrix(axis: torch.Tensor, angle):
     """
     Returns the rotation matrix associated with counterclockwise rotation about
     the given axis by 'angle' radians.
@@ -34,6 +34,9 @@ def rotation_matrix(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
     // angle = the rotation in radians
     """
 
+    # ensure axis is a torch tensor
+    if axis.type() != torch.Tensor:
+        axis = torch.tensor(axis)
     # normalise axis length
     axis = axis / (torch.linalg.norm(axis))
 
@@ -45,6 +48,12 @@ def rotation_matrix(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
     s = torch.sin(angle)
 
     # and here it is!
+    rotmat2d = torch.tensor(
+        [
+            [c s],
+            [-s c]
+        ]
+    )
     rotmat = torch.tensor(
         [
             [
@@ -68,9 +77,7 @@ def rotation_matrix(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
     return rotmat
 
 
-def random_walk(
-    t: int, size_img: torch.Tensor, max_step: float = 0.25, sharpest: float = torch.pi
-):
+def random_walk(t: int, size_img, max_step=0.25, sharpest=torch.pi):
     """
     Sets up a random walk in three dimensions:
     // t = number of steps taken on each walk, dtype = uint
@@ -96,9 +103,9 @@ def random_walk(
     step_size = max_step / (np.sqrt(3))
 
     # random starting point:
-    x[0] = r.uniform(0, size_img[0].item())
-    y[0] = r.uniform(0, size_img[1].item())
-    z[0] = r.uniform(0, size_img[2].item())
+    x[0] = r.uniform(0, size_img[0])
+    y[0] = r.uniform(0, size_img[1])
+    z[0] = r.uniform(0, size_img[2])
 
     # random first step:
     v = torch.from_numpy(np.random.uniform(-step_size, step_size, 3))
@@ -119,9 +126,9 @@ def random_walk(
             or ((z[q] > (size_img[2] + 1)) or (z[q] < -1))
         ):
             # new random starting point:
-            x[q] = r.uniform(0, size_img[0].item())
-            y[q] = r.uniform(0, size_img[1].item())
-            z[q] = r.uniform(0, size_img[2].item())
+            x[q] = r.uniform(0, size_img[0])
+            y[q] = r.uniform(0, size_img[1])
+            z[q] = r.uniform(0, size_img[2])
             # new random first step:
             v = torch.from_numpy(np.random.uniform(-step_size, step_size, 3))
 
@@ -143,17 +150,17 @@ def random_walk(
                 axis = torch.cross(v, k)
 
             # find the polar rotation matrix about axis
-            r_pol = rotation_matrix(axis, torch.tensor(theta))
+            r_pol = rotation_matrix(axis, theta)
             # find the azimuth rotation matrix about v1
-            r_azi = rotation_matrix(v, torch.tensor(phi))
+            r_azi = rotation_matrix(v, phi)
 
             # apply rotations to create a random vector within an angle of phi
             v = r_azi @ r_pol @ v
 
         # ensure step is consistent length:
-        v = (v * max_step) / torch.linalg.norm(v)
+        v = (torch.tensor(v) * max_step) / torch.linalg.norm(v)
 
-    data = torch.stack((x, y, z), 1).to(device)
+    data = torch.stack((x, y, z), 1)
 
     return data
 
@@ -170,33 +177,6 @@ def semirandomised_values(mean: float, uncertainty: float, size: int) -> torch.T
     return output
 
 
-def gaussian(
-    intensity,
-    sigma_xy,
-    sigma_z,
-    x_indices,
-    y_indices,
-    z_indices,
-    x_coordinates,
-    y_coordinates,
-    z_coordinates,
-):
-    gaussian = (
-        # normalisation constant for 3D gaussian
-        (intensity[i] / ((sigma_xy[i] ** 3) * (2 * np.pi) ** 1.5))
-        # gaussian equation
-        * torch.exp(
-            -(
-                ((x_indices - x_coordinates) ** 2) / (2 * sigma_xy**2)
-                + ((y_indices - y_coordinates) ** 2) / (2 * sigma_xy**2)
-                + ((z_indices - z_coordinates) ** 2) / (2 * sigma_z**2)
-            )
-        )
-    )
-
-    return gaussian
-
-
 def simulated_image(coordinates, img_size, intensity, sigma_xy, sigma_z):
 
     #####################
@@ -205,7 +185,7 @@ def simulated_image(coordinates, img_size, intensity, sigma_xy, sigma_z):
 
     # generate tensor of indices
     img_indices = torch.from_numpy(np.indices((img_size))).to(device)
-    # resize to (n_molecules, img_size[0], img_size[1], img_size[2], 2)
+    # resize to (n_molecules, img_size[0], img_size[1], 2)
     img_indices = (
         img_indices.unsqueeze(0)
         .expand(
@@ -236,31 +216,23 @@ def simulated_image(coordinates, img_size, intensity, sigma_xy, sigma_z):
     y_coordinates = coordinates[:, 1, :, :, :].to(device)
     z_coordinates = coordinates[:, 2, :, :, :].to(device)
 
-    # broadcast the intensity and sigma values too
-    for _ in range(img_size.shape[0]):
-        sigma_xy = sigma_xy.unsqueeze(-1)
-        sigma_z = sigma_z.unsqueeze(-1)
-        intensity = intensity.unsqueeze(-1)
-    sigma_xy = sigma_xy.expand(x_coordinates.shape).to(device)
-    sigma_z = sigma_z.expand(x_coordinates.shape).to(device)
-    intensity = intensity.expand(x_coordinates.shape).to(device)
-
     # add the gaussian contribution to the spot
-    gaussians = torch.zeros((img_size[0], img_size[1], img_size[2])).to(device)
-    for i in range(coordinates.shape[0]):
-
-        gaussians += (
+    gaussians = (
+        (
             # normalisation constant for 3D gaussian
-            (intensity[i] / ((sigma_xy[i] ** 3) * (2 * np.pi) ** 1.5))
+            (intensity / ((sigma_xy**3) * (2 * np.pi) ** 1.5))
             # gaussian equation
             * torch.exp(
                 -(
-                    ((x_indices[i] - x_coordinates[i]) ** 2) / (2 * sigma_xy[i] ** 2)
-                    + ((y_indices[i] - y_coordinates[i]) ** 2) / (2 * sigma_xy[i] ** 2)
-                    + ((z_indices[i] - z_coordinates[i]) ** 2) / (2 * sigma_z[i] ** 2)
+                    ((x_indices - x_coordinates) ** 2) / (2 * sigma_xy**2)
+                    + ((y_indices - y_coordinates) ** 2) / (2 * sigma_xy**2)
+                    + ((z_indices - z_coordinates) ** 2) / (2 * sigma_z**2)
                 )
             )
-        ).to(device)
+        )
+        .sum(0)
+        .to(device)
+    )
 
     return gaussians
 
@@ -283,11 +255,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 today = str(date.today())
 today = today.replace("-", "")
 # path to data
-path_lores = os.path.join(os.getcwd(), "images/sims/microtubules/lores_test/")
-path_hires = os.path.join(os.getcwd(), "images/sims/microtubules/hires_test/")
+path_data = os.path.join(os.getcwd(), "images/sims/microtubules/noGT_LD/")
 # make directories if they don't already exist so images have somewhere to go
-os.makedirs(path_lores, exist_ok=True)
-os.makedirs(path_hires, exist_ok=True)
+os.makedirs(path_data, exist_ok=True)
 
 ###################
 # finishing alarm #
@@ -304,8 +274,8 @@ freq = 440
 
 # number of images to produce (for each resolution if making GT as well):
 n_imgs = 1
-# file name root (include underscore at the end):
-filename = "sim_mtubs_"
+# file name root:
+filename = "sim_img_sim_noGT_"
 # bittage of final image - 8 | 16 | 32 | 64
 # 16-bit is as high as cameras usually go anyway
 img_bit = 16
@@ -318,14 +288,11 @@ img_bit = 16
 # total length of all fibres:
 t = 2500
 # size of final image in pixels:
-size_img_lores = torch.tensor([96, 96, 32]).to(device)
-size_img_hires = torch.tensor([96, 96, 96]).to(device)
+size_img = torch.tensor([96, 96, 32]).to(device)
 # step size each iteration (make it <0.5 if you want continuous microtubules):
 max_step = 0.5
 # how sharply can the path bend each step?
 sharpest = (np.pi * max_step) / 10
-# do we want the hires data to have the same coordinates as the lores data?
-same = True
 
 #############
 # PSF specs #
@@ -357,37 +324,22 @@ sig_unc = 0.2
 mean_sigxy = (xres / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 mean_sigz = (zres / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 
-###################
-# simulation loop #
-###################
+#################
+# training loop #
+#################
 
 for i in range(n_imgs):
     # generate data as list of 3d coordinates
-    lores_data = random_walk(t, size_img_lores, max_step, sharpest)
-
-    # NOTE: this is a work in progress!
-    # the if statement checks the 'same' variable
-    # which is whether we want the hires and lores data to have the same coordinates
-    # then multiplies all the z-coordinates by the difference
-    # FIX: at the moment it multiplies all of the data - just do the z-coordinates!
-    if same:
-        ratio = (size_img_hires / size_img_lores).expand(len(lores_data), -1)
-        hires_data = lores_data * ratio
-    else:
-        hires_data = random_walk(t, size_img_hires, max_step, sharpest)
-
+    lores_data = random_walk(t, size_img, max_step, sharpest)
+    hires_data = (size_img[0] / size_img[2]) * lores_data
     # broadcast intensity & sigma values into arrays with slight randomness to their values
-    intensity = semirandomised_values(mean_int, int_unc, len(lores_data))
-    sigma_xy = semirandomised_values(mean_sigxy, sig_unc, len(lores_data))
-    sigma_z = semirandomised_values(mean_sigz, sig_unc, len(lores_data))
+    intensity = semirandomised_values(mean_int, int_unc, len(lores_data[0]))
+    sigma_xy = semirandomised_values(mean_sigxy, sig_unc, len(lores_data[0]))
+    sigma_z = semirandomised_values(mean_sigz, sig_unc, len(lores_data[0]))
 
     # function to make an image of gaussians from molecule coordinate data
-    sim_img_lores = simulated_image(
-        lores_data, size_img_lores, intensity, sigma_xy, sigma_z
-    ).to(device)
-    sim_img_hires = simulated_image(
-        hires_data, size_img_hires, intensity, sigma_xy, sigma_xy
-    ).to(device)
+    sim_img_lores = simulated_image(lores_data, size_img, intensity, sigma_xy, sigma_z).to(device)
+    sim_img_hires = simulated_image(hires_data, size_img, intensity, sigma_xy, sigma_xy).to(device)
 
     # normalise all the brightness values
     # then scale them up so that the brightest value is 255
@@ -397,11 +349,9 @@ for i in range(n_imgs):
     # TODO: finish this idea! NOTE - will not work for different sampling (as in this code)
 
     # tiff writing in python gets the axes wrong so rotate the image before writing
-    sim_img_lores = torch.rot90(sim_img_lores, 1, (0, 2)).short()
-    sim_img_hires = torch.rot90(sim_img_hires, 1, (0, 2)).short()
-    # convert to numpy array
-    sim_img_lores = sim_img_lores.cpu().detach().numpy().astype(np.uint16)
-    sim_img_hires = sim_img_hires.cpu().detach().numpy().astype(np.uint16)
+    sim_img_lores = torch.rot90(sim_img_lores, 1, (0, 2))
+    # convert to torch tensor
+    sim_img_lores = sim_img_lores.cpu().detach().numpy()
 
     # add an offset
     # sim_img += 100
@@ -409,17 +359,15 @@ for i in range(n_imgs):
     # write to file
     # isotropic version:
     filename_ind = filename + str(i + 1)
-    lores_file_path = os.path.join(path_lores, filename_ind + "_lores")
-    hires_file_path = os.path.join(path_hires, filename_ind + "_hires")
+    file_path = os.path.join(path_data, filename_ind)
     print(f"Writing to tiff: {i + 1}")
-    imwrite(lores_file_path, sim_img_lores)
-    imwrite(hires_file_path, sim_img_hires)
+    imwrite(file_path, sim_img_lores.astype(torch.ShortTensor))
+    imwrite(file_path, sim_img_lores.astype(torch.ShortTensor))
 
 
 time2 = perf_counter()
 
-print(f"The low-res image dimensions are {size_img_lores[:]}")
-print(f"The high-res image dimensions are {size_img_hires[:]}")
+print(f"The image dimensions are {size_img}")
 print(f"The number of total steps is {t}")
 print(f"the mean xy-sigma is {mean_sigxy}")
 print(f"the mean z-sigma is {mean_sigz}")
@@ -435,7 +383,7 @@ os.system("play -nq -t alsa synth {} sine {}".format(duration, freq))
 
 # make a metadata file
 metadata = today + "simulated_microtubules_metadata.txt"
-metadata = os.path.join(path_lores, metadata)
+metadata = os.path.join(path_data, metadata)
 # make sure to remove any other metadata files in the subdirectory
 if os.path.exists(metadata):
     os.remove(metadata)
@@ -443,8 +391,7 @@ with open(metadata, "a") as file:
     file.writelines(
         [
             os.path.basename(__file__),
-            f"\nlow-res image dimensions, voxels: {size_img_lores}",
-            f"\nhigh-res image dimensions, voxels: {size_img_hires}",
+            f"\nimage dimensions, voxels: {size_img}",
             f"\nmean emitter intensity, AU1: {mean_int}",
             f"\nemitter intensity variance, AU1: {int_unc * mean_int}",
             f"\nvoxel dimensions, nm: {(size_pix_nm, size_pix_nm, size_pix_nm)}",

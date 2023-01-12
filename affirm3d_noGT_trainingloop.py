@@ -189,8 +189,10 @@ dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_worker
 ########################################
 
 # sigma for real (lores) and isomorphic (hires) data
-sig_lores = (zres_lo / size_pix_nm) / (2 * sqrt(2 * log(2)))
-sig_hires = (zres_hi / size_pix_nm) / (2 * sqrt(2 * log(2)))
+# sig_lores = (zres_lo / size_pix_nm) / (2 * sqrt(2 * log(2)))
+# sig_hires = (zres_hi / size_pix_nm) / (2 * sqrt(2 * log(2)))
+sig_lores = zres_lo / size_pix_nm
+sig_hires = zres_hi / size_pix_nm
 # sig_extra is derived from the formula of convolving 2 gaussians, where it is defined as:
 # gaussian(sigma=sig_hires) *convolve* gaussian(sigma=sig_extra) = gaussian(sigma=sig_lores)
 sig_extra = sqrt(sig_lores**2 - sig_hires**2)

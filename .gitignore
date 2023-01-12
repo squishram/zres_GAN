@@ -4,6 +4,7 @@ guides/
 old-obsolete_code/
 tutorials/
 venv/
+*.tif
 
 *.log
 *.swp

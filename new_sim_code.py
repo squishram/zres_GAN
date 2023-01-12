@@ -349,9 +349,9 @@ sig_unc = 0.2
 mean_sigxy = (xres / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 mean_sigz = (zres / size_pix_nm) / (2 * math.sqrt(2 * math.log(2)))
 
-#################
-# training loop #
-#################
+###################
+# simulation loop #
+###################
 
 for i in range(n_imgs):
     # generate data as list of 3d coordinates

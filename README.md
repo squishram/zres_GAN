@@ -57,8 +57,13 @@
   - [x] try more epochs - then try making a larger dataset
 
 ### YOU ARE HERE
+
+### To Do: in simulating data
+    1. make isotropic + isotropically sampled version of some data
+    2. make anisotropic + anisotropically sampled version of the same data
+    3. check the 1d gaussian kernel works to turn 1. into 2.
+
   - [ ] sanity check: simulate the same data, lowres and highres versions, then see if you can convolve the hr one down to match the lr one
-      - [ ] sanity check: simulate the same data, lowres and highres versions, then see if you can convolve the hr one down to match the lr one
       - [ ] does the sampling ratio and the resolution ratio have to be the same? Surely this is a kind of bias? need to fix
 
   - [ ] generate a CUBIC ground truth as well when you make your dataset - that way you'll have something to compare to the Gen(Upsampled(Input))
